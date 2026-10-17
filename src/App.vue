@@ -3,14 +3,21 @@ import { ref, computed, onMounted } from 'vue';
 import MacroDragCanvas from './components/MacroDragCanvas.vue';
 import MicroTileUnscramble from './components/MicroTileUnscramble.vue';
 import TeacherAdmin from './components/TeacherAdmin.vue';
-import { defaultQuestions, type QuestionData } from './data/questions';
 import ContrastPuzzle from './components/ContrastPuzzle.vue';
+import { defaultQuestions, type QuestionData } from './data/questions';
+import { useTTS, useSpeechRecognition } from './utils/useSpeech';
 
 const showAdmin = ref(false);
 const currentIndex = ref(0);
 const questionBank = ref<QuestionData[]>([]);
 const currentStage = ref<'macro' | 'micro' | 'success'>('macro');
 const currentMode = ref<'relative' | 'preposition'>('relative');
+
+// 初始化 TTS 與 STT
+const { speak } = useTTS();
+const { isListening, isSupported, startListening } = useSpeechRecognition();
+const voiceSuccess = ref(false);
+const voiceFailed = ref(false);
 
 onMounted(() => {
   const saved = localStorage.getItem('custom_questions');
@@ -27,20 +34,59 @@ onMounted(() => {
 
 const currentQuestion = computed(() => questionBank.value[currentIndex.value] || defaultQuestions[0]);
 
+// 取得當前要「朗讀與測驗」的目標修飾語 (只抓紅字部分)
+const targetModifier = computed(() => {
+  if (currentQuestion.value.type === 'contrast') {
+    return currentQuestion.value.modifiers.relative.label;
+  }
+  return currentQuestion.value.modifiers[currentMode.value].label;
+});
+
 const handleUnpack = (type: 'relative' | 'preposition') => {
   currentMode.value = type;
   currentStage.value = 'micro';
 };
 
-const handleSuccess = () => { currentStage.value = 'success'; };
+// 進入通關畫面，並自動播放 TTS
+const handleSuccess = () => {
+  currentStage.value = 'success';
+  voiceSuccess.value = false;
+  voiceFailed.value = false;
+  
+  // 延遲 0.5 秒讓畫面動畫跑完，只唸出目標文法區塊
+  setTimeout(() => {
+    speak(targetModifier.value);
+  }, 500);
+};
 
 const nextQuestion = () => {
+  // 停止任何正在播放的語音
+  window.speechSynthesis.cancel();
+  
   if (currentIndex.value < questionBank.value.length - 1) {
     currentIndex.value++;
     currentStage.value = 'macro';
   } else {
     currentIndex.value = 0;
     currentStage.value = 'macro';
+  }
+};
+
+// 手動點擊播放 TTS
+const playAudio = () => {
+  speak(targetModifier.value);
+};
+
+// 啟動語音辨識
+const checkPronunciation = async () => {
+  voiceFailed.value = false;
+  // 只比對目標文法區塊
+  const result = await startListening(targetModifier.value);
+  
+  if (result) {
+    voiceSuccess.value = true;
+  } else {
+    voiceFailed.value = true;
   }
 };
 
@@ -65,10 +111,49 @@ const updateQuestionBank = (updatedQuestions: QuestionData[]) => {
     </header>
 
     <main class="game-card" :key="currentQuestion.id + currentMode">
-      <!-- 類型一：對比題型 -->
-      <div v-if="currentQuestion.type === 'contrast' && currentQuestion.contrastData" class="stage-content">
+      
+      <!-- 🎯 通關成功畫面 (所有題型共用) -->
+      <div v-if="currentStage === 'success'" class="success-screen">
+        <div class="confetti">🎉 ✨ 🏆</div>
+        <h2>角色解鎖成功！</h2>
+        
+        <!-- 句子展示：紅字部分為目標 -->
+        <div class="success-sentence">
+          {{ currentQuestion.targetNoun }} 
+          <span class="highlight-red">{{ targetModifier }}</span> 
+          is my favorite.
+        </div>
+        <p class="speak-hint">👉 請大聲唸出<span class="highlight-red">紅色</span>的部分！</p>
+
+        <!-- 語音互動區塊 -->
+        <div class="voice-actions">
+          <button class="btn-audio" @click="playAudio">
+            🔊 聆聽發音
+          </button>
+          
+          <button 
+            v-if="isSupported" 
+            class="btn-mic" 
+            :class="{ 'listening': isListening, 'success': voiceSuccess, 'error': voiceFailed }"
+            @click="checkPronunciation"
+            :disabled="isListening"
+          >
+            <span v-if="isListening">🎙️ 正在聆聽...</span>
+            <span v-else-if="voiceSuccess">✅ 發音完美！</span>
+            <span v-else-if="voiceFailed">❌ 再試一次 (點擊錄音)</span>
+            <span v-else>🎤 換你唸唸看</span>
+          </button>
+          <p v-else class="no-mic-hint">您的瀏覽器不支援麥克風功能</p>
+        </div>
+
+        <button class="btn-primary mt-4" @click="nextQuestion">
+          {{ currentIndex < questionBank.length - 1 ? '下一關 ➔' : '回到第一關 ↺' }}
+        </button>
+      </div>
+
+      <!-- 🎯 類型一：對比題型 (非通關階段) -->
+      <div v-else-if="currentQuestion.type === 'contrast' && currentQuestion.contrastData" class="stage-content">
         <ContrastPuzzle 
-          v-if="currentStage !== 'success'"
           :chineseSentence="currentQuestion.contrastData.chineseSentence"
           :chineseHighlight="currentQuestion.contrastData.chineseHighlight"
           :nounImage="currentQuestion.contrastData.nounImage"
@@ -80,23 +165,9 @@ const updateQuestionBank = (updatedQuestions: QuestionData[]) => {
           :antecedent="currentQuestion.antecedent"
           @success="handleSuccess"
         />
-        
-        <!-- 通關畫面 (對比題) -->
-        <div v-else class="success-screen">
-          <div class="confetti">🎉 ✨ 🏆</div>
-          <h2>角色解鎖成功！</h2>
-          <div class="success-sentence">
-            {{ currentQuestion.targetNoun }} 
-            <span class="highlight-red">{{ currentQuestion.modifiers.relative.label }}</span> 
-            is my favorite.
-          </div>
-          <button class="btn-primary" @click="nextQuestion">
-            {{ currentIndex < questionBank.length - 1 ? '下一關 ➔' : '回到第一關 ↺' }}
-          </button>
-        </div>
       </div>
 
-      <!-- 類型二：標準題型 (Macro -> Micro) -->
+      <!-- 🎯 類型二：標準題型 (非通關階段) -->
       <template v-else>
         <div v-if="currentStage === 'macro'" class="stage-content">
           <h2 class="instruction">請將角色圖塊拖曳到名詞<strong>後方</strong>。</h2>
@@ -123,21 +194,8 @@ const updateQuestionBank = (updatedQuestions: QuestionData[]) => {
             @success="handleSuccess"
           />
         </div>
-
-        <!-- 通關畫面 (標準題) -->
-        <div v-else-if="currentStage === 'success'" class="success-screen">
-          <div class="confetti">🎉 ✨ 🏆</div>
-          <h2>角色解鎖成功！</h2>
-          <div class="success-sentence">
-            {{ currentQuestion.targetNoun }} 
-            <span class="highlight-red">{{ currentQuestion.modifiers[currentMode].label }}</span> 
-            is my favorite.
-          </div>
-          <button class="btn-primary" @click="nextQuestion">
-            {{ currentIndex < questionBank.length - 1 ? '下一關 ➔' : '回到第一關 ↺' }}
-          </button>
-        </div>
       </template>
+
     </main>
 
     <TeacherAdmin 
@@ -240,7 +298,15 @@ header h1 {
 }
 
 .highlight { color: #1cb0f6; }
-.highlight-red { color: #ff4b4b; font-weight: 800; }
+
+/* 紅字高亮：加深背景，強化視覺 */
+.highlight-red { 
+  color: #ea2b2b; 
+  font-weight: 800;
+  background: #ffe6e6;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
 
 /* 通關成功畫面 */
 .success-screen {
@@ -278,12 +344,87 @@ header h1 {
   padding: 24px 32px;
   border-radius: 16px;
   border: 2px dashed #58cc02;
-  margin-bottom: 40px;
+  margin-bottom: 10px; /* 縮小與提示文字的距離 */
   line-height: 1.6;
   color: #333;
   max-width: 90%;
 }
 
+/* 語音提示文字 */
+.speak-hint {
+  font-size: 1rem;
+  color: #777;
+  font-weight: bold;
+  margin-top: 0;
+  margin-bottom: 20px;
+}
+
+/* 🎤 語音互動區塊樣式 */
+.voice-actions {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 40px;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.btn-audio {
+  background: #e6f7ff;
+  color: #1cb0f6;
+  border: 2px solid #1cb0f6;
+  padding: 12px 24px;
+  border-radius: 12px;
+  font-weight: bold;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-audio:hover { background: #1cb0f6; color: white; }
+
+.btn-mic {
+  background: #f0f0f0;
+  color: #555;
+  border: 2px solid #ccc;
+  border-bottom-width: 4px;
+  padding: 12px 24px;
+  border-radius: 12px;
+  font-weight: bold;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.1s;
+}
+.btn-mic.listening {
+  background: #ffebee;
+  color: #ea2b2b;
+  border-color: #ea2b2b;
+  animation: pulse 1.5s infinite;
+}
+.btn-mic.success {
+  background: #d7ffb8;
+  color: #58cc02;
+  border-color: #58cc02;
+}
+.btn-mic.error {
+  background: #ffe6e6;
+  color: #ea2b2b;
+  border-color: #ea2b2b;
+}
+
+.no-mic-hint {
+  color: #999;
+  font-size: 0.9rem;
+}
+
+.mt-4 { margin-top: 16px; }
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(234, 43, 43, 0.4); }
+  70% { box-shadow: 0 0 0 10px rgba(234, 43, 43, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(234, 43, 43, 0); }
+}
+
+/* 主按鈕 */
 .btn-primary {
   background-color: #58cc02;
   color: white;
