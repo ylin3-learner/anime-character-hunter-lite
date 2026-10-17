@@ -15,28 +15,48 @@ const localQuestions = ref<QuestionData[]>(JSON.parse(JSON.stringify(props.curre
 
 // 表單狀態
 const editingId = ref<string | null>(null);
+const questionType = ref<'standard' | 'contrast'>('standard');
+
 const imageUrl = ref('');
 const targetNoun = ref('');
 const relativeSentence = ref('');
 const prepositionSentence = ref('');
+
+const chineseSentence = ref('');
+const chineseHighlight = ref('');
+const modifierImageUrl = ref('');
+
 const fileInput = ref<HTMLInputElement | null>(null);
+const modifierFileInput = ref<HTMLInputElement | null>(null);
+const uploadTarget = ref<'noun' | 'modifier'>('noun');
 
 const isEditing = computed(() => editingId.value !== null);
 
 const resetForm = () => {
   editingId.value = null;
+  questionType.value = 'standard';
   imageUrl.value = '';
   targetNoun.value = '';
   relativeSentence.value = '';
   prepositionSentence.value = '';
+  chineseSentence.value = '';
+  chineseHighlight.value = '';
+  modifierImageUrl.value = '';
 };
 
 const editQuestion = (q: QuestionData) => {
   editingId.value = q.id;
+  questionType.value = q.type;
   imageUrl.value = q.imageUrl;
   targetNoun.value = q.targetNoun;
   relativeSentence.value = q.modifiers.relative.label;
   prepositionSentence.value = q.modifiers.preposition.label;
+  
+  if (q.contrastData) {
+    chineseSentence.value = q.contrastData.chineseSentence;
+    chineseHighlight.value = q.contrastData.chineseHighlight;
+    modifierImageUrl.value = q.contrastData.modifierImage;
+  }
 };
 
 const deleteQuestion = (id: string) => {
@@ -46,14 +66,21 @@ const deleteQuestion = (id: string) => {
   }
 };
 
-// 處理圖片上傳
+const triggerUpload = (target: 'noun' | 'modifier') => {
+  uploadTarget.value = target;
+  if (target === 'noun') {
+    fileInput.value?.click();
+  } else {
+    modifierFileInput.value?.click();
+  }
+};
+
 const handleFileChange = (event: Event) => {
   const target = event.target as HTMLInputElement;
   const file = target.files?.[0];
-  if (file) processImage(file);
+  if (file) processImage(file, uploadTarget.value);
 };
 
-// 全局監聽貼上，只處理圖片，不干擾文字貼上
 const handlePaste = (event: ClipboardEvent) => {
   const items = event.clipboardData?.items;
   if (!items) return;
@@ -62,8 +89,9 @@ const handlePaste = (event: ClipboardEvent) => {
     if (item.type.indexOf('image') !== -1) {
       const file = item.getAsFile();
       if (file) {
-        processImage(file);
-        event.preventDefault(); // 只有攔截到圖片才阻止預設行為
+        const target = (questionType.value === 'contrast' && imageUrl.value && !modifierImageUrl.value) ? 'modifier' : 'noun';
+        processImage(file, target);
+        event.preventDefault();
         break;
       }
     }
@@ -78,14 +106,18 @@ onUnmounted(() => {
   window.removeEventListener('paste', handlePaste);
 });
 
-const processImage = (file: File) => {
+const processImage = (file: File, target: 'noun' | 'modifier') => {
   if (file.size > 2 * 1024 * 1024) {
     alert('圖片太大囉！請上傳小於 2MB 的圖片。');
     return;
   }
   const reader = new FileReader();
   reader.onload = (e) => {
-    imageUrl.value = e.target?.result as string;
+    if (target === 'noun') {
+      imageUrl.value = e.target?.result as string;
+    } else {
+      modifierImageUrl.value = e.target?.result as string;
+    }
   };
   reader.readAsDataURL(file);
 };
@@ -110,6 +142,7 @@ const saveQuestion = () => {
 
   const newQuestion: QuestionData = {
     id: editingId.value || `q_${Date.now()}`,
+    type: questionType.value,
     targetNoun: targetNoun.value,
     antecedent: {
       noun: targetNoun.value,
@@ -122,6 +155,15 @@ const saveQuestion = () => {
       preposition: { label: prepositionSentence.value, tiles: prepTiles, correctAnswer: prepCorrect }
     }
   };
+
+  if (questionType.value === 'contrast') {
+    newQuestion.contrastData = {
+      chineseSentence: chineseSentence.value || '中文句子',
+      chineseHighlight: chineseHighlight.value || '高亮部分',
+      nounImage: imageUrl.value || 'https://api.dicebear.com/7.x/adventurer/svg?seed=default',
+      modifierImage: modifierImageUrl.value || 'https://api.dicebear.com/7.x/shapes/svg?seed=default'
+    };
+  }
 
   if (isEditing.value) {
     const index = localQuestions.value.findIndex(q => q.id === editingId.value);
@@ -143,103 +185,150 @@ const saveAllAndClose = () => {
 </script>
 
 <template>
-  <div class="admin-modal">
-    <div class="admin-layout">
-      
-      <!-- 左側：題庫清單 -->
-      <div class="sidebar">
-        <div class="sidebar-header">
-          <h2>📚 課前備課中心</h2>
-          <p>請在此準備好所有題目，完成後點擊下方按鈕進入學生模式。</p>
-        </div>
+  <!-- 使用 Teleport 將彈窗直接傳送到 body，避免被干擾 -->
+  <Teleport to="body">
+    <div class="admin-modal">
+      <div class="admin-layout">
         
-        <div class="question-list">
-          <div 
-            v-for="(q, index) in localQuestions" 
-            :key="q.id" 
-            class="question-item"
-            :class="{ active: editingId === q.id }"
-            @click="editQuestion(q)"
-          >
-            <div class="q-index">第 {{ index + 1 }} 關</div>
-            <div class="q-content">
-              <span class="q-noun">{{ q.targetNoun }}</span>
-              <span class="q-desc">{{ q.modifiers.relative.label }}</span>
-            </div>
-            <button class="btn-delete" @click.stop="deleteQuestion(q.id)">✕</button>
+        <!-- 左側：題庫清單 -->
+        <div class="sidebar">
+          <div class="sidebar-header">
+            <h2>📚 課前備課中心</h2>
+            <p>請在此準備好所有題目，完成後點擊下方按鈕進入學生模式。</p>
           </div>
           
-          <button class="btn-new" @click="resetForm" :class="{ active: editingId === null }">
-            ➕ 新增題目
-          </button>
+          <div class="question-list">
+            <div 
+              v-for="(q, index) in localQuestions" 
+              :key="q.id" 
+              class="question-item"
+              :class="{ active: editingId === q.id }"
+              @click="editQuestion(q)"
+            >
+              <div class="q-index">
+                第 {{ index + 1 }} 關 
+                <span class="q-type-tag" :class="q.type">{{ q.type === 'contrast' ? '對比題' : '標準題' }}</span>
+              </div>
+              <div class="q-content">
+                <span class="q-noun">{{ q.targetNoun }}</span>
+                <span class="q-desc">{{ q.modifiers.relative.label }}</span>
+              </div>
+              <button class="btn-delete" @click.stop="deleteQuestion(q.id)">✕</button>
+            </div>
+            
+            <button class="btn-new" @click="resetForm" :class="{ active: editingId === null }">
+              ➕ 新增題目
+            </button>
+          </div>
+
+          <div class="sidebar-footer">
+            <button class="btn-close" @click="saveAllAndClose">
+              ✅ 完成備課，開始上課
+            </button>
+          </div>
         </div>
 
-        <div class="sidebar-footer">
-          <button class="btn-close" @click="saveAllAndClose">
-            ✅ 完成備課，開始上課
-          </button>
-        </div>
-      </div>
+        <!-- 右側：編輯表單 -->
+        <div class="editor">
+          <div class="editor-header">
+            <h3>{{ isEditing ? '✏️ 編輯題目' : '🆕 新增題目' }}</h3>
+            
+            <div class="type-switcher">
+              <button 
+                :class="{ active: questionType === 'standard' }" 
+                @click="questionType = 'standard'"
+              >標準題 (拖拉+重組)</button>
+              <button 
+                :class="{ active: questionType === 'contrast' }" 
+                @click="questionType = 'contrast'"
+              >對比題 (拼圖+中英對照)</button>
+            </div>
+          </div>
+          
+          <div class="editor-body">
+            <div class="form-group">
+              <label>{{ questionType === 'contrast' ? '名詞圖片 (拼圖右側)' : '角色圖片' }}</label>
+              <div class="upload-area" @click="triggerUpload('noun')">
+                <img v-if="imageUrl" :src="imageUrl" class="preview-img" />
+                <div v-else class="upload-placeholder">
+                  <span class="icon">📸</span>
+                  <span>點擊選擇圖片，或貼上截圖</span>
+                </div>
+              </div>
+              <input ref="fileInput" type="file" accept="image/*" style="display: none" @change="handleFileChange" />
+            </div>
 
-      <!-- 右側：編輯表單 -->
-      <div class="editor">
-        <div class="editor-header">
-          <h3>{{ isEditing ? '✏️ 編輯題目' : '🆕 新增題目' }}</h3>
-        </div>
-        
-        <div class="editor-body">
-          <div class="form-group">
-            <label>角色圖片 (點擊上傳，或在任意處 Ctrl+V 貼上截圖)</label>
-            <div class="upload-area" @click="fileInput?.click()">
-              <img v-if="imageUrl" :src="imageUrl" class="preview-img" />
-              <div v-else class="upload-placeholder">
-                <span class="icon">📸</span>
-                <span>點擊選擇圖片，或直接貼上截圖</span>
+            <div class="form-group" v-if="questionType === 'contrast'">
+              <label>修飾語圖片 (拼圖左側)</label>
+              <div class="upload-area" @click="triggerUpload('modifier')">
+                <img v-if="modifierImageUrl" :src="modifierImageUrl" class="preview-img" />
+                <div v-else class="upload-placeholder">
+                  <span class="icon">🧩</span>
+                  <span>點擊選擇圖片，或貼上截圖</span>
+                </div>
+              </div>
+              <input ref="modifierFileInput" type="file" accept="image/*" style="display: none" @change="handleFileChange" />
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label>目標名詞</label>
+                <input v-model="targetNoun" type="text" placeholder="Ex: The girl" />
               </div>
             </div>
-            <input ref="fileInput" type="file" accept="image/*" style="display: none" @change="handleFileChange" />
-          </div>
 
-          <div class="form-row">
             <div class="form-group">
-              <label>目標名詞</label>
-              <input v-model="targetNoun" type="text" placeholder="Ex: The girl" />
+              <label>句型 A：關係子句 (Relative Clause)</label>
+              <input v-model="relativeSentence" type="text" placeholder="Ex: who wears a blue uniform" />
+            </div>
+
+            <template v-if="questionType === 'contrast'">
+              <div class="form-group">
+                <label>中文句子</label>
+                <input v-model="chineseSentence" type="text" placeholder="Ex: 穿藍色制服的女孩" />
+              </div>
+              <div class="form-group">
+                <label>中文高亮 (修飾語部分)</label>
+                <input v-model="chineseHighlight" type="text" placeholder="Ex: 穿藍色制服的" />
+              </div>
+            </template>
+
+            <div class="form-group" v-else>
+              <label>句型 B：介系詞片語 (Prepositional Phrase)</label>
+              <input v-model="prepositionSentence" type="text" placeholder="Ex: in a blue uniform" />
             </div>
           </div>
 
-          <div class="form-group">
-            <label>句型 A：關係子句 (Relative Clause)</label>
-            <input v-model="relativeSentence" type="text" placeholder="Ex: who wears a blue uniform" />
+          <div class="editor-footer">
+            <button v-if="isEditing" class="btn-cancel" @click="resetForm">取消</button>
+            <button class="btn-save" @click="saveQuestion">
+              {{ isEditing ? '💾 儲存修改' : '✨ 加入題庫' }}
+            </button>
           </div>
-
-          <div class="form-group">
-            <label>句型 B：介系詞片語 (Prepositional Phrase)</label>
-            <input v-model="prepositionSentence" type="text" placeholder="Ex: in a blue uniform" />
-          </div>
-        </div>
-
-        <div class="editor-footer">
-          <button v-if="isEditing" class="btn-cancel" @click="resetForm">取消</button>
-          <button class="btn-save" @click="saveQuestion">
-            {{ isEditing ? '💾 儲存修改' : '✨ 加入題庫' }}
-          </button>
         </div>
       </div>
     </div>
-  </div>
+  </Teleport>
 </template>
 
 <style scoped>
+/* 確保遮罩層絕對覆蓋 */
 .admin-modal {
-  position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-  background: rgba(0,0,0,0.4); display: flex; justify-content: center; align-items: center;
-  z-index: 100; backdrop-filter: blur(8px);
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  width: 100vw; height: 100vh;
+  background: rgba(0, 0, 0, 0.5); 
+  display: flex; 
+  justify-content: center; 
+  align-items: center;
+  z-index: 9999; /* 確保在最上層 */
+  backdrop-filter: blur(4px);
 }
 
 .admin-layout {
   display: flex;
   width: 90vw;
-  max-width: 960px;
+  max-width: 1000px;
   height: 85vh;
   background: #ffffff;
   border-radius: 24px;
@@ -293,13 +382,23 @@ const saveAllAndClose = () => {
 .question-item:hover { border-color: #1cb0f6; transform: translateY(-2px); }
 .question-item.active { border-color: #1cb0f6; background: #e6f7ff; box-shadow: 0 4px 12px rgba(28,176,246,0.1); }
 
-.q-index { font-size: 0.75rem; color: #1cb0f6; font-weight: bold; }
+.q-index { font-size: 0.75rem; color: #1cb0f6; font-weight: bold; display: flex; align-items: center; }
 .q-content { display: flex; flex-direction: column; gap: 2px; padding-right: 20px; }
 .q-noun { font-weight: bold; color: #333; font-size: 1.05rem; }
 .q-desc { font-size: 0.85rem; color: #777; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+.q-type-tag {
+  font-size: 0.65rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+  color: white;
+}
+.q-type-tag.standard { background: #1cb0f6; }
+.q-type-tag.contrast { background: #ff9800; }
+
 .btn-delete {
-  position: absolute; top: 12px; right: 12px;
+  position: absolute; top: 16px; right: 16px;
   background: #ffdfe0; color: #ff4b4b; border: none; 
   width: 24px; height: 24px; border-radius: 50%;
   display: flex; justify-content: center; align-items: center;
@@ -356,6 +455,28 @@ const saveAllAndClose = () => {
 }
 .editor-header h3 { margin: 0; color: #333; font-size: 1.3rem; }
 
+.type-switcher {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+.type-switcher button {
+  flex: 1;
+  padding: 10px;
+  background: #f0f0f0;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  font-weight: bold;
+  color: #777;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.type-switcher button.active {
+  background: #e6f7ff;
+  border-color: #1cb0f6;
+  color: #1cb0f6;
+}
+
 .editor-body {
   flex: 1;
   overflow-y: auto;
@@ -372,6 +493,8 @@ const saveAllAndClose = () => {
   outline: none; 
   transition: border 0.2s;
   background: #fafafa;
+  width: 100%;
+  box-sizing: border-box;
 }
 .form-group input[type="text"]:focus { border-color: #1cb0f6; background: #ffffff; box-shadow: 0 0 0 4px rgba(28,176,246,0.1); }
 

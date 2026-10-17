@@ -4,6 +4,7 @@ import MacroDragCanvas from './components/MacroDragCanvas.vue';
 import MicroTileUnscramble from './components/MicroTileUnscramble.vue';
 import TeacherAdmin from './components/TeacherAdmin.vue';
 import { defaultQuestions, type QuestionData } from './data/questions';
+import ContrastPuzzle from './components/ContrastPuzzle.vue';
 
 const showAdmin = ref(false);
 const currentIndex = ref(0);
@@ -64,47 +65,79 @@ const updateQuestionBank = (updatedQuestions: QuestionData[]) => {
     </header>
 
     <main class="game-card" :key="currentQuestion.id + currentMode">
-      <!-- 階段：巨觀拖拉 -->
-      <div v-if="currentStage === 'macro'" class="stage-content">
-        <h2 class="instruction">請將角色圖塊拖曳到名詞<strong>後方</strong>。</h2>
-        <div class="target-noun">
-          <span class="highlight">{{ currentQuestion.targetNoun }}</span>
-        </div>
-        <MacroDragCanvas 
-          :targetNoun="currentQuestion.targetNoun"
-          :modifiers="currentQuestion.modifiers"
-          :imageUrl="currentQuestion.imageUrl"
-          @unpack="handleUnpack"
-        />
-      </div>
-
-      <!-- 階段：微觀字磚 -->
-      <div v-else-if="currentStage === 'micro'" class="stage-content">
-        <h2 class="instruction">圖塊已解鎖！請排列出正確的字序。</h2>
-        <div class="target-noun">
-          <span class="highlight">{{ currentQuestion.targetNoun }}</span>
-        </div>
-        <MicroTileUnscramble 
-          :initialTiles="currentQuestion.modifiers[currentMode].tiles" 
-          :antecedent="currentQuestion.antecedent" 
-          :correctAnswer="currentQuestion.modifiers[currentMode].correctAnswer"
+      <!-- 類型一：對比題型 -->
+      <div v-if="currentQuestion.type === 'contrast' && currentQuestion.contrastData" class="stage-content">
+        <ContrastPuzzle 
+          v-if="currentStage !== 'success'"
+          :chineseSentence="currentQuestion.contrastData.chineseSentence"
+          :chineseHighlight="currentQuestion.contrastData.chineseHighlight"
+          :nounImage="currentQuestion.contrastData.nounImage"
+          :modifierImage="currentQuestion.contrastData.modifierImage"
+          :englishNoun="currentQuestion.targetNoun"
+          :modifierLabel="currentQuestion.modifiers.relative.label"
+          :tiles="currentQuestion.modifiers.relative.tiles"
+          :correctAnswer="currentQuestion.modifiers.relative.correctAnswer"
+          :antecedent="currentQuestion.antecedent"
           @success="handleSuccess"
         />
+        
+        <!-- 通關畫面 (對比題) -->
+        <div v-else class="success-screen">
+          <div class="confetti">🎉 ✨ 🏆</div>
+          <h2>角色解鎖成功！</h2>
+          <div class="success-sentence">
+            {{ currentQuestion.targetNoun }} 
+            <span class="highlight-red">{{ currentQuestion.modifiers.relative.label }}</span> 
+            is my favorite.
+          </div>
+          <button class="btn-primary" @click="nextQuestion">
+            {{ currentIndex < questionBank.length - 1 ? '下一關 ➔' : '回到第一關 ↺' }}
+          </button>
+        </div>
       </div>
 
-      <!-- 階段：通關成功 -->
-      <div v-else-if="currentStage === 'success'" class="success-screen">
-        <div class="confetti">🎉 ✨ 🏆</div>
-        <h2>角色解鎖成功！</h2>
-        <div class="success-sentence">
-          {{ currentQuestion.targetNoun }} 
-          <span class="highlight-red">{{ currentQuestion.modifiers[currentMode].label }}</span> 
-          is my favorite.
+      <!-- 類型二：標準題型 (Macro -> Micro) -->
+      <template v-else>
+        <div v-if="currentStage === 'macro'" class="stage-content">
+          <h2 class="instruction">請將角色圖塊拖曳到名詞<strong>後方</strong>。</h2>
+          <div class="target-noun">
+            <span class="highlight">{{ currentQuestion.targetNoun }}</span>
+          </div>
+          <MacroDragCanvas 
+            :targetNoun="currentQuestion.targetNoun"
+            :modifiers="currentQuestion.modifiers"
+            :imageUrl="currentQuestion.imageUrl"
+            @unpack="handleUnpack"
+          />
         </div>
-        <button class="btn-primary" @click="nextQuestion">
-          {{ currentIndex < questionBank.length - 1 ? '下一關 ➔' : '回到第一關 ↺' }}
-        </button>
-      </div>
+
+        <div v-else-if="currentStage === 'micro'" class="stage-content">
+          <h2 class="instruction">圖塊已解鎖！請排列出正確的字序。</h2>
+          <div class="target-noun">
+            <span class="highlight">{{ currentQuestion.targetNoun }}</span>
+          </div>
+          <MicroTileUnscramble 
+            :initialTiles="currentQuestion.modifiers[currentMode].tiles" 
+            :antecedent="currentQuestion.antecedent" 
+            :correctAnswer="currentQuestion.modifiers[currentMode].correctAnswer"
+            @success="handleSuccess"
+          />
+        </div>
+
+        <!-- 通關畫面 (標準題) -->
+        <div v-else-if="currentStage === 'success'" class="success-screen">
+          <div class="confetti">🎉 ✨ 🏆</div>
+          <h2>角色解鎖成功！</h2>
+          <div class="success-sentence">
+            {{ currentQuestion.targetNoun }} 
+            <span class="highlight-red">{{ currentQuestion.modifiers[currentMode].label }}</span> 
+            is my favorite.
+          </div>
+          <button class="btn-primary" @click="nextQuestion">
+            {{ currentIndex < questionBank.length - 1 ? '下一關 ➔' : '回到第一關 ↺' }}
+          </button>
+        </div>
+      </template>
     </main>
 
     <TeacherAdmin 
