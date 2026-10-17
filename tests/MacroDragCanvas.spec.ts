@@ -3,12 +3,13 @@ import { mount } from '@vue/test-utils';
 import MacroDragCanvas from '../src/components/MacroDragCanvas.vue';
 
 describe('MacroDragCanvas', () => {
+  // 更新 Props 以符合 Sprint 4 的雙文法與圖片結構
   const props = {
     targetNoun: 'The girl',
-    modifierBlock: {
-      id: 'block1',
-      type: 'relative-clause',
-      label: 'who wears a blue uniform'
+    imageUrl: 'dummy-url.svg',
+    modifiers: {
+      relative: { label: 'who wears a blue uniform' },
+      preposition: { label: 'in a blue uniform' }
     }
   };
 
@@ -19,6 +20,9 @@ describe('MacroDragCanvas', () => {
     const draggable = wrapper.find('[data-test="draggable-block"]');
     expect(draggable.exists()).toBe(true);
     expect(draggable.attributes('draggable')).toBe('true');
+    
+    // 預設應該是 relative 模式的 label
+    expect(draggable.text()).toContain('who wears a blue uniform');
   });
 
   it('將圖塊拖放到合法區域後，進入解鎖狀態（觸發 unpack 事件）', async () => {
@@ -34,9 +38,11 @@ describe('MacroDragCanvas', () => {
 
     // 驗證 UI 狀態改變
     expect(wrapper.find('[data-test="target-noun"]').text()).toContain('The girl');
+    
     // 驗證是否觸發了通知父元件解包的 emit
+    // 因為現在 emit 傳遞的是型態 ('relative' | 'preposition')，不再是字串句子
     expect(wrapper.emitted()).toHaveProperty('unpack');
-    expect(wrapper.emitted('unpack')![0]).toEqual(['who wears a blue uniform']);
+    expect(wrapper.emitted('unpack')![0]).toEqual(['relative']);
   });
 
   it('圖塊如果放在非目標區，不會觸發 unpack', async () => {

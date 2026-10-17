@@ -3,74 +3,80 @@ import { ref } from 'vue';
 
 const props = defineProps<{
   targetNoun: string;
-  modifierBlock: {
-    id: string;
-    type: string;
-    label: string;
+  modifiers: {
+    relative: { label: string };
+    preposition: { label: string };
   };
+  imageUrl: string;
 }>();
 
 const emit = defineEmits<{
-  (e: 'unpack', blockLabel: string): void;
+  (e: 'unpack', type: 'relative' | 'preposition'): void;
 }>();
 
+const currentMode = ref<'relative' | 'preposition'>('relative');
 const isDragging = ref(false);
 const isDropped = ref(false);
+
+const toggleMode = () => {
+  currentMode.value = currentMode.value === 'relative' ? 'preposition' : 'relative';
+};
 
 const handleDragStart = (event: DragEvent) => {
   isDragging.value = true;
   if (event.dataTransfer) {
     event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('text/plain', props.modifierBlock.label);
+    event.dataTransfer.setData('text/plain', props.modifiers[currentMode.value].label);
   }
 };
 
-const handleDragEnd = () => {
-  isDragging.value = false;
-};
+const handleDragEnd = () => { isDragging.value = false; };
 
 const handleDrop = () => {
   isDropped.value = true;
-  // 爆破：通知父組件切換到微觀字磚
-  emit('unpack', props.modifierBlock.label);
+  emit('unpack', currentMode.value);
 };
 </script>
 
 <template>
-  <div 
-    data-test="canvas-bg" 
-    class="macro-canvas" 
-    @drop.prevent="isDropped ? null : $event.preventDefault()"
-  >
+  <!-- 補回 data-test="canvas-bg" -->
+  <div data-test="canvas-bg" class="macro-canvas" @drop.prevent>
     <div class="sentence-area">
-      <!-- 目標名詞 -->
+      <!-- 補回 data-test="target-noun" -->
       <span data-test="target-noun" class="noun">{{ targetNoun }}</span>
-
-      <!-- 拖放目標區（名詞後方） -->
+      <!-- 補回 data-test="drop-zone" -->
       <div 
-        data-test="drop-zone" 
+        data-test="drop-zone"
         class="drop-zone"
         :class="{ 'active': isDragging, 'filled': isDropped }"
         @dragover.prevent
         @drop.prevent="handleDrop"
       >
-        <span v-if="!isDropped" class="drop-hint">⬇️ 拖曳圖塊到此處 (名詞後方)</span>
-        <span v-else class="dropped-content">{{ modifierBlock.label }}</span>
+        <span v-if="!isDropped" class="drop-hint">⬇️ 拖曳至此 (名詞後方)</span>
+        <span v-else class="dropped-content">{{ modifiers[currentMode].label }}</span>
       </div>
     </div>
 
-    <!-- 下方的角色圖塊庫 -->
     <div v-if="!isDropped" class="block-bank">
-      <div
+      <!-- 補回 data-test="draggable-block" -->
+      <div 
         data-test="draggable-block"
-        class="character-block"
-        draggable="true"
-        @dragstart="handleDragStart"
+        class="character-block" 
+        draggable="true" 
+        @dragstart="handleDragStart" 
         @dragend="handleDragEnd"
       >
-        <div class="block-icon">👤</div>
-        <div class="block-label">{{ modifierBlock.label }}</div>
+        <img :src="imageUrl" class="block-img" alt="character" />
+        <div class="block-label">{{ modifiers[currentMode].label }}</div>
       </div>
+    </div>
+
+    <!-- 切換器 (Module C) -->
+    <div v-if="!isDropped" class="derivation-toggle">
+      <p>切換句型：</p>
+      <button @click="toggleMode" class="btn-toggle">
+        {{ currentMode === 'relative' ? '👉 切換為介系詞片語' : '👉 切換為關係子句' }}
+      </button>
     </div>
   </div>
 </template>
@@ -148,14 +154,32 @@ const handleDrop = () => {
   transform: scale(0.95);
 }
 
-.block-icon {
-  font-size: 2rem;
-  margin-bottom: 8px;
+.block-img { 
+  width: 60px; 
+  height: 60px; 
+  border-radius: 50%; 
+  margin-bottom: 8px; 
+  background: #eee; 
 }
 
 .block-label {
   font-size: 0.9rem;
   font-weight: 500;
   color: #555;
+}
+
+.derivation-toggle { 
+  margin-top: 30px; 
+  text-align: center; 
+}
+
+.btn-toggle {
+  background: #e6f7ff; 
+  color: #1cb0f6; 
+  border: 2px solid #1cb0f6;
+  padding: 10px 20px; 
+  border-radius: 20px; 
+  font-weight: bold; 
+  cursor: pointer;
 }
 </style>
