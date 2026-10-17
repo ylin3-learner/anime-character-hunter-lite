@@ -3,11 +3,11 @@ import { mount } from '@vue/test-utils';
 import MacroDragCanvas from '../src/components/MacroDragCanvas.vue';
 
 describe('MacroDragCanvas', () => {
-  // 更新 Props 以符合 Sprint 4 的雙文法與圖片結構
+  // 更新 Props 以符合泛化後的 grammarFeature 結構
   const props = {
     targetNoun: 'The girl',
     imageUrl: 'dummy-url.svg',
-    modifiers: {
+    grammarFeature: {
       relative: { label: 'who wears a blue uniform' },
       preposition: { label: 'in a blue uniform' }
     }
