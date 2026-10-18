@@ -2,16 +2,16 @@ import { ref } from 'vue';
 
 // ── 1. TTS 文字轉語音 ──
 export function useTTS() {
-  const speak = (text: string) => {
+  const speak = (text: string, rate: number = 0.85) => {
     if (!('speechSynthesis' in window)) {
       console.warn('瀏覽器不支援 TTS');
       return;
     }
-    window.speechSynthesis.cancel(); // 停止目前語音
+    window.speechSynthesis.cancel();
 
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'en-US';
-    utterance.rate = 0.85; // 語速稍微放慢，適合教學
+    utterance.rate = rate; // 👈 套用傳入的倍速
     utterance.pitch = 1.0;
 
     window.speechSynthesis.speak(utterance);
