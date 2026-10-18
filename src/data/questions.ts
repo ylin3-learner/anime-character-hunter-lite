@@ -8,6 +8,9 @@ export interface QuestionData {
     person: 'person' | 'thing';
   };
   imageUrl: string;
+  // 👇 新增：模組化開關 (若 undefined 則預設全開)
+  enabledStages?: ('input' | 'macro' | 'micro' | 'pronunciation' | 'noticing')[];
+  
   grammarFeature: {
     relative: { label: string; tiles: string[]; correctAnswer: string[] };
     preposition: { label: string; tiles: string[]; correctAnswer: string[] };
@@ -16,7 +19,6 @@ export interface QuestionData {
     audioText: string;
     options: { image: string; text: string; isCorrect: boolean }[];
   };
-  // 👇 新增意識提升歸納板的資料
   noticingData?: {
     examples: string[];
     question: string;
@@ -38,6 +40,7 @@ export const defaultQuestions: QuestionData[] = [
     targetNoun: 'The girl',
     antecedent: { noun: 'The girl', number: 'singular', person: 'person' },
     imageUrl: 'https://api.dicebear.com/7.x/adventurer/svg?seed=AnimeGirl',
+    enabledStages: ['input', 'macro', 'micro', 'pronunciation', 'noticing'], // 👈 預設全開
     grammarFeature: {
       relative: {
         label: 'who wears a blue uniform',
@@ -57,7 +60,6 @@ export const defaultQuestions: QuestionData[] = [
         { image: 'https://api.dicebear.com/7.x/adventurer/svg?seed=OtherGirl', text: '穿紅色洋裝的女孩', isCorrect: false }
       ]
     },
-    // 👇 填入歸納板的內容
     noticingData: {
       examples: [
         'The girl who wears a blue uniform is my sister.',

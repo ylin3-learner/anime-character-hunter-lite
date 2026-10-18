@@ -8,6 +8,11 @@ const props = defineProps<{
   highlightPart: string;
 }>();
 
+// 👇 新增 skip 事件
+const emit = defineEmits<{
+  (e: 'skip'): void;
+}>();
+
 const { isSupported, startListening } = useSpeechRecognition();
 const { speak } = useTTS();
 
@@ -22,17 +27,14 @@ const isAnalyzing = ref(false);
 let mediaRecorder: MediaRecorder | null = null;
 let audioChunks: Blob[] = [];
 
-// 將目標句子拆解成單字陣列，方便做差異比對
 const targetWords = computed(() => {
   return props.targetSentence.replace(/\|/g, '').trim().split(/\s+/);
 });
 
-// 將辨識結果拆解成單字陣列
 const resultWords = computed(() => {
   return transcript.value.trim().split(/\s+/);
 });
 
-// 判斷特定單字是否在學生的辨識結果中
 const isWordMatched = (word: string) => {
   if (!transcript.value) return false;
   const cleanWord = word.toLowerCase().replace(/[.,?!]/g, '');
@@ -49,7 +51,7 @@ const startRecording = async () => {
     if (!MediaRecorder.isTypeSupported('audio/webm') && MediaRecorder.isTypeSupported('audio/mp4')) {
       mimeType = 'audio/mp4';
     }
-    
+
     mediaRecorder = new MediaRecorder(stream, { mimeType });
     audioChunks = [];
 
@@ -66,7 +68,6 @@ const startRecording = async () => {
         hasRecording.value = true;
       }
 
-      // 啟動 STT 辨識
       setTimeout(async () => {
         isAnalyzing.value = true;
         try {
@@ -114,7 +115,6 @@ onUnmounted(() => {
 
 <template>
   <div class="analyzer-container">
-    <!-- 句子顯示區 -->
     <div class="sentence-display">
       <span class="text-part">{{ displaySentence.split('|')[0].trim() }}</span>
       <span class="pause-marker"></span>
@@ -123,26 +123,20 @@ onUnmounted(() => {
       <span class="text-part">{{ displaySentence.split('|')[2]?.trim() }}</span>
     </div>
 
-    <!-- 播放速度選擇 -->
     <div class="speed-selector">
       <span class="speed-label">播放速度：</span>
-      <button 
-        v-for="rate in [0.5, 0.85, 1.0]" 
-        :key="rate"
-        :class="{ active: playbackRate === rate }"
-        @click="playbackRate = rate"
-      >
+      <button v-for="rate in [0.5, 0.85, 1.0]" :key="rate" :class="{ active: playbackRate === rate }"
+        @click="playbackRate = rate">
         {{ rate }}x
       </button>
     </div>
 
-    <!-- 操作按鈕 -->
     <div class="controls">
       <button class="btn-audio" @click="speak(targetSentence.replace(/\|/g, ''), playbackRate)">
         🔊 聽標準發音 ({{ playbackRate }}x)
       </button>
-      
-      <button v-if="!isRecording" class="btn-mic" @click="startRecording" :disabled="!isSupported || isAnalyzing">
+
+      <button v-if="!isRecording && isSupported" class="btn-mic" @click="startRecording" :disabled="isAnalyzing">
         🎤 開始錄音
       </button>
 
@@ -153,29 +147,28 @@ onUnmounted(() => {
       <button v-if="hasRecording && !isRecording" class="btn-playback" @click="playRecording">
         ▶️ 播放我的錄音
       </button>
+
+      <!-- 👇 新增：跳過語音按鈕 -->
+      <button v-if="!isRecording" class="btn-skip" @click="emit('skip')">
+        ⏭️ 跳過語音
+      </button>
     </div>
 
-    <!-- 🎯 核心：文字差異對照面板 -->
+    <!-- 對照面板保持不變 -->
     <div v-if="hasRecording || isAnalyzing" class="result-panel">
       <div class="word-comparison">
-        <!-- 顯示目標句子，把學生沒唸出來的單字變灰色 -->
         <div class="target-line">
-          <span 
-            v-for="(word, index) in targetWords" 
-            :key="index"
-            class="word"
-            :class="isWordMatched(word) ? 'matched' : 'missed'"
-          >
+          <span v-for="(word, index) in targetWords" :key="index" class="word"
+            :class="isWordMatched(word) ? 'matched' : 'missed'">
             {{ word }}
           </span>
         </div>
-        
-        <!-- 顯示學生的辨識結果 -->
+
         <div class="result-line">
           <p v-if="isAnalyzing" class="status-text">⏳ 正在分析發音...</p>
           <p v-else-if="isMatch" class="status-text success">✅ 太棒了！發音完全正確。</p>
           <p v-else class="status-text error">⚠️ 辨識結果有些落差，請點擊播放聽聽看。</p>
-          
+
           <p class="transcript-text" :class="{ 'has-error': !isMatch }">
             「{{ transcript || '未辨識出聲音' }}」
           </p>
@@ -186,29 +179,146 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.analyzer-container { display: flex; flex-direction: column; align-items: center; width: 100%; max-width: 600px; margin: 0 auto; gap: 20px; }
+/* 樣式保持不變，新增 skip 按鈕樣式 */
+/* ... 之前的樣式 ... */
+.btn-skip {
+  background: #f0f0f0;
+  color: #777;
+  border-bottom: 4px solid #ccc;
+}
+
+.btn-skip:active {
+  border-bottom-width: 0;
+  transform: translateY(4px);
+}
+
+/* 以下保留你原本的樣式... */
+.analyzer-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 600px;
+  margin: 0 auto;
+  gap: 20px;
+}
 
 .sentence-display {
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; font-size: 1.4rem; line-height: 1.8; color: #333; background: #f9f9f9; padding: 16px 24px; border-radius: 12px; border: 2px dashed #ccc; text-align: center; width: 100%; box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 1.4rem;
+  line-height: 1.8;
+  color: #333;
+  background: #f9f9f9;
+  padding: 16px 24px;
+  border-radius: 12px;
+  border: 2px dashed #ccc;
+  text-align: center;
+  width: 100%;
+  box-sizing: border-box;
 }
-.sentence-display .highlight { color: #ea2b2b; font-weight: 800; background: #ffe6e6; padding: 2px 8px; border-radius: 6px; }
-.pause-marker { display: inline-block; width: 4px; height: 24px; background: #1cb0f6; border-radius: 2px; }
 
-.speed-selector { display: flex; align-items: center; gap: 8px; background: #f0f0f0; padding: 6px 12px; border-radius: 20px; }
-.speed-label { font-size: 0.9rem; color: #666; font-weight: bold; }
-.speed-selector button { background: none; border: none; padding: 4px 12px; border-radius: 12px; font-weight: bold; color: #777; cursor: pointer; transition: all 0.2s; }
-.speed-selector button.active { background: white; color: #1cb0f6; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+.sentence-display .highlight {
+  color: #ea2b2b;
+  font-weight: 800;
+  background: #ffe6e6;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
 
-.controls { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
-button { padding: 12px 20px; border-radius: 12px; font-weight: bold; font-size: 1rem; cursor: pointer; border: none; transition: all 0.1s; }
-.btn-audio { background: #e6f7ff; color: #1cb0f6; border: 2px solid #1cb0f6; }
-.btn-mic { background: #1cb0f6; color: white; border-bottom: 4px solid #1899d6; }
-.btn-mic.recording { background: #ff4b4b; border-bottom-color: #cc0000; }
-.btn-playback { background: #58cc02; color: white; border-bottom: 4px solid #46a302; }
-button:active { border-bottom-width: 0; transform: translateY(4px); }
-button:disabled { opacity: 0.5; cursor: not-allowed; }
+.pause-marker {
+  display: inline-block;
+  width: 4px;
+  height: 24px;
+  background: #1cb0f6;
+  border-radius: 2px;
+}
 
-/* 🎯 文字對照面板樣式 */
+.speed-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f0f0f0;
+  padding: 6px 12px;
+  border-radius: 20px;
+}
+
+.speed-label {
+  font-size: 0.9rem;
+  color: #666;
+  font-weight: bold;
+}
+
+.speed-selector button {
+  background: none;
+  border: none;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-weight: bold;
+  color: #777;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.speed-selector button.active {
+  background: white;
+  color: #1cb0f6;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.controls {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+button {
+  padding: 12px 20px;
+  border-radius: 12px;
+  font-weight: bold;
+  font-size: 1rem;
+  cursor: pointer;
+  border: none;
+  transition: all 0.1s;
+}
+
+.btn-audio {
+  background: #e6f7ff;
+  color: #1cb0f6;
+  border: 2px solid #1cb0f6;
+}
+
+.btn-mic {
+  background: #1cb0f6;
+  color: white;
+  border-bottom: 4px solid #1899d6;
+}
+
+.btn-mic.recording {
+  background: #ff4b4b;
+  border-bottom-color: #cc0000;
+}
+
+.btn-playback {
+  background: #58cc02;
+  color: white;
+  border-bottom: 4px solid #46a302;
+}
+
+button:active {
+  border-bottom-width: 0;
+  transform: translateY(4px);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .result-panel {
   width: 100%;
   background: white;
@@ -216,10 +326,14 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   border-radius: 16px;
   padding: 20px;
   text-align: left;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
-.word-comparison { display: flex; flex-direction: column; gap: 16px; }
+.word-comparison {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
 
 .target-line {
   display: flex;
@@ -235,14 +349,12 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   transition: all 0.3s;
 }
 
-/* 學生有唸出來的單字：綠色 */
 .word.matched {
   background: #e6f7e6;
   color: #1c9c1c;
   font-weight: bold;
 }
 
-/* 學生漏掉或發音錯的單字：灰色+刪除線 */
 .word.missed {
   background: #f0f0f0;
   color: #999;
@@ -254,9 +366,18 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   padding-top: 16px;
 }
 
-.status-text { font-weight: bold; margin-bottom: 8px; }
-.status-text.success { color: #58cc02; }
-.status-text.error { color: #ff4b4b; }
+.status-text {
+  font-weight: bold;
+  margin-bottom: 8px;
+}
+
+.status-text.success {
+  color: #58cc02;
+}
+
+.status-text.error {
+  color: #ff4b4b;
+}
 
 .transcript-text {
   color: #555;
@@ -266,5 +387,9 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   border-radius: 8px;
   margin: 0;
 }
-.transcript-text.has-error { color: #ea2b2b; background: #ffe6e6; }
+
+.transcript-text.has-error {
+  color: #ea2b2b;
+  background: #ffe6e6;
+}
 </style>
