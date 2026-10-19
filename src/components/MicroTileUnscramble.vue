@@ -71,6 +71,7 @@ watch(
       } else if (signals.value.length === 0 && !isOrderCorrect) {
         // 錯排，但沒有踩到迷思雷，觸發抖動反饋
         playError();
+        emit('misconception', 'WRONG_ORDER'); // 發送通用錯誤代碼
         isWrong.value = true;
         setTimeout(() => {
           isWrong.value = false;

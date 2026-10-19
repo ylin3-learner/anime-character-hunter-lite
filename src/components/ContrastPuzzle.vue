@@ -24,6 +24,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'success'): void;
+  (e: 'misconception', code: string): void;
 }>();
 
 // 座標系設定
@@ -114,6 +115,7 @@ const stopDrag = () => {
     }, 800);
   } else {
     playError();
+    emit('misconception', 'PUZZLE_ERROR'); // 發送拼圖錯誤代碼
     modifierX.value = initialModifierX.value;
     modifierY.value = 0;
     isNearTarget.value = false;

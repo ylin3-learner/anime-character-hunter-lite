@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue';
 import MacroDragCanvas from './components/MacroDragCanvas.vue';
 import MicroTileUnscramble from './components/MicroTileUnscramble.vue';
 import TeacherAdmin from './components/TeacherAdmin.vue';
+import TeacherAnalytics from './components/TeacherAnalytics.vue'; // 👈 新增引入
 import ContrastPuzzle from './components/ContrastPuzzle.vue';
 import StructuredInput from './components/StructuredInput.vue';
 import PronunciationAnalyzer from './components/PronunciationAnalyzer.vue';
@@ -14,12 +15,12 @@ import { CloudDatabase } from './services/CloudDatabase';
 
 // 狀態管理
 const showAdmin = ref(false);
+const showAnalytics = ref(false); // 👈 新增：數據面板狀態
 const currentIndex = ref(0);
 const questionBank = ref<QuestionData[]>([]);
 const currentStage = ref<'input' | 'macro' | 'micro' | 'success' | 'noticing'>('macro');
 const currentMode = ref<'relative' | 'preposition'>('relative');
 
-// 👇 修正：改為 playSuccess
 const { playSuccess } = useSound();
 
 // 👇 教師權限驗證狀態
@@ -33,14 +34,12 @@ const showSummary = ref(false);
 const completedCount = ref(0);
 
 onMounted(async () => {
-  // 1. 優先嘗試從雲端載入
   const cloudQuestions = await CloudDatabase.fetchQuestions();
 
   if (cloudQuestions && cloudQuestions.length > 0) {
     questionBank.value = cloudQuestions;
     localStorage.setItem('custom_questions', JSON.stringify(cloudQuestions));
   } else {
-    // 2. 雲端沒資料，載入本機備份或預設題庫
     const saved = localStorage.getItem('custom_questions');
     if (saved) {
       try { questionBank.value = JSON.parse(saved); } catch (e) {
@@ -89,10 +88,17 @@ const fullSentenceData = computed(() => {
   };
 });
 
+// 👇 修改：接收迷思時，寫入 Supabase
 const handleMisconception = (code: string) => {
   if (!sessionLog.value.includes(code)) {
     sessionLog.value.push(code);
   }
+  // 寫入雲端資料庫
+  CloudDatabase.logEvent({
+    student_name: '匿名學生', // MVP 階段先寫死
+    question_id: currentQuestion.value.id,
+    error_code: code
+  });
 };
 
 const handleInputSuccess = () => {
@@ -110,11 +116,18 @@ const handleUnpack = (type: 'relative' | 'preposition') => {
   currentStage.value = 'micro';
 };
 
+// 👇 修改：過關時，寫入 Supabase
 const handleSuccess = () => {
-  // 👇 修正：呼叫 playSuccess
   playSuccess();
-
   currentStage.value = 'success';
+
+  // 寫入雲端資料庫
+  CloudDatabase.logEvent({
+    student_name: '匿名學生',
+    question_id: currentQuestion.value.id,
+    error_code: 'SUCCESS'
+  });
+
   if (completedCount.value <= currentIndex.value) {
     completedCount.value = currentIndex.value + 1;
   }
@@ -153,18 +166,14 @@ const restartGame = () => {
   checkAndSetInitialStage();
 };
 
-// 修改更新題庫的邏輯（從 TeacherAdmin 存檔後觸發）
 const updateQuestionBank = async (updatedQuestions: QuestionData[]) => {
-  // 1. 更新畫面並關閉備課中心
   questionBank.value = updatedQuestions;
   currentIndex.value = 0;
   checkAndSetInitialStage();
   showAdmin.value = false;
 
-  // 2. 存到本機備份（防斷網）
   localStorage.setItem('custom_questions', JSON.stringify(updatedQuestions));
 
-  // 3. 存到雲端資料庫
   const success = await CloudDatabase.saveQuestions(updatedQuestions);
   if (!success) {
     alert('注意：題庫已存在本機，但「雲端同步失敗」，請確認網路連線。');
@@ -181,7 +190,6 @@ const openAdmin = () => {
 };
 
 const verifyAdmin = () => {
-  // 預設密碼為 admin123，可自行更改
   if (adminPasswordInput.value === 'admin123') {
     isAdminAuthenticated.value = true;
     sessionStorage.setItem('admin_auth', 'true');
@@ -204,19 +212,18 @@ const verifyAdmin = () => {
           第 {{ currentIndex + 1 }} / {{ questionBank.length }} 關
         </div>
         <button class="btn-finish" @click="showSummary = true">🏁 結束練習</button>
-        <!-- 👇 改用 openAdmin 觸發密碼驗證 -->
         <button class="btn-admin" @click="openAdmin">👩‍🏫 教師備課中心</button>
+        <!-- 👇 新增：數據分析按鈕 -->
+        <button class="btn-analytics" @click="showAnalytics = true">📊 數據分析</button>
       </div>
     </header>
 
     <main class="game-card" :key="currentQuestion.id + currentMode">
-      <!-- 意識提升歸納板 -->
       <div v-if="currentStage === 'noticing' && currentQuestion.noticingData" class="stage-content"
         style="justify-content: center;">
         <NoticingBoard :data="currentQuestion.noticingData" @complete="handleNoticingComplete" />
       </div>
 
-      <!-- 通關成功畫面 -->
       <div v-else-if="currentStage === 'success'" class="success-screen">
         <div class="confetti">🎉 ✨ 🏆</div>
         <h2>角色解鎖成功！</h2>
@@ -230,7 +237,6 @@ const verifyAdmin = () => {
           {{ currentIndex < questionBank.length - 1 ? '下一關 ➔' : '完成練習 🏁' }} </button>
       </div>
 
-      <!-- 對比題型 -->
       <div v-else-if="currentQuestion.type === 'contrast' && currentQuestion.contrastData" class="stage-content">
         <ContrastPuzzle :chineseSentence="currentQuestion.contrastData.chineseSentence"
           :chineseHighlight="currentQuestion.contrastData.chineseHighlight"
@@ -241,10 +247,10 @@ const verifyAdmin = () => {
           :correctAnswer="currentQuestion.grammarFeature.relative.correctAnswer"
           :antecedent="currentQuestion.antecedent" :layout="currentQuestion.contrastData.layout"
           :explanationTitle="currentQuestion.explanation?.title" :explanationDesc="currentQuestion.explanation?.desc"
-          @success="handleSuccess" />
+          @success="handleSuccess" 
+          @misconception="handleMisconception" />
       </div>
 
-      <!-- 標準題型 -->
       <template v-else>
         <div v-if="currentStage === 'input' && currentQuestion.inputData" class="stage-content">
           <StructuredInput :audioText="currentQuestion.inputData.audioText" :options="currentQuestion.inputData.options"
@@ -269,16 +275,17 @@ const verifyAdmin = () => {
       </template>
     </main>
 
-    <!-- 總結報告彈窗 -->
     <SummaryReport v-if="showSummary" :completedLevels="completedCount" :totalLevels="questionBank.length"
       :misconceptions="sessionLog" @restart="restartGame" />
 
-    <!-- 👇 教師密碼驗證彈窗 -->
+    <!-- 👇 新增：教師數據分析彈窗 -->
+    <TeacherAnalytics v-if="showAnalytics" @close="showAnalytics = false" />
+
+    <!-- 教師密碼驗證彈窗 -->
     <div v-if="showAdminAuth" class="auth-overlay">
       <div class="auth-card">
         <h3>👩‍🏫 教師驗證</h3>
         <p>請輸入密碼以進入備課中心</p>
-        <!-- 預設密碼: admin123 -->
         <input type="password" v-model="adminPasswordInput" placeholder="" @keyup.enter="verifyAdmin" />
         <div class="auth-actions">
           <button class="btn-cancel" @click="showAdminAuth = false">取消</button>
@@ -293,6 +300,7 @@ const verifyAdmin = () => {
 </template>
 
 <style scoped>
+/* 保持原有樣式不變，新增 btn-analytics 樣式 */
 .app-container {
   max-width: 800px;
   margin: 0 auto;
@@ -363,6 +371,24 @@ header h1 {
 }
 
 .btn-admin:active {
+  border-bottom-width: 0;
+  transform: translateY(4px);
+}
+
+/* 👇 新增數據按鈕樣式 */
+.btn-analytics {
+  background: #9c27b0;
+  color: white;
+  border: none;
+  border-bottom: 4px solid #7b1fa2;
+  padding: 8px 20px;
+  border-radius: 12px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.1s;
+}
+
+.btn-analytics:active {
   border-bottom-width: 0;
   transform: translateY(4px);
 }
@@ -474,7 +500,7 @@ header h1 {
   }
 }
 
-/* 👇 教師驗證彈窗樣式 */
+/* 教師驗證彈窗樣式 */
 .auth-overlay {
   position: fixed;
   top: 0;
