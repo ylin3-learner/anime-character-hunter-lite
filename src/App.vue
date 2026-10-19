@@ -10,6 +10,7 @@ import NoticingBoard from './components/NoticingBoard.vue';
 import SummaryReport from './components/SummaryReport.vue';
 import { defaultQuestions, type QuestionData } from './data/questions';
 import { useSound } from './utils/useSound';
+import { CloudDatabase } from './services/CloudDatabase';
 
 // 狀態管理
 const showAdmin = ref(false);
@@ -31,17 +32,23 @@ const sessionLog = ref<string[]>([]);
 const showSummary = ref(false);
 const completedCount = ref(0);
 
-onMounted(() => {
-  // 👇 移除 unlockAudio 相關邏輯，交給 useSound.ts 處理
-  const saved = localStorage.getItem('custom_questions');
-  if (saved) {
-    try {
-      questionBank.value = JSON.parse(saved);
-    } catch (e) {
+onMounted(async () => {
+  // 1. 優先嘗試從雲端載入
+  const cloudQuestions = await CloudDatabase.fetchQuestions();
+
+  if (cloudQuestions && cloudQuestions.length > 0) {
+    questionBank.value = cloudQuestions;
+    localStorage.setItem('custom_questions', JSON.stringify(cloudQuestions));
+  } else {
+    // 2. 雲端沒資料，載入本機備份或預設題庫
+    const saved = localStorage.getItem('custom_questions');
+    if (saved) {
+      try { questionBank.value = JSON.parse(saved); } catch (e) {
+        questionBank.value = [...defaultQuestions];
+      }
+    } else {
       questionBank.value = [...defaultQuestions];
     }
-  } else {
-    questionBank.value = [...defaultQuestions];
   }
   checkAndSetInitialStage();
 });
@@ -146,20 +153,21 @@ const restartGame = () => {
   checkAndSetInitialStage();
 };
 
-const updateQuestionBank = (updatedQuestions: QuestionData[]) => {
-  try {
-    localStorage.setItem('custom_questions', JSON.stringify(updatedQuestions));
-    questionBank.value = updatedQuestions;
-    currentIndex.value = 0;
-    checkAndSetInitialStage();
-    showAdmin.value = false;
-  } catch (error: any) {
-    if (error.name === 'QuotaExceededError' || error.code === 22) {
-      alert('儲存空間已滿！因為圖片佔用太多空間，請試著減少圖片數量，或使用較小的圖片。');
-    } else {
-      console.error('儲存題庫失敗:', error);
-      alert('儲存題庫失敗，請重試。');
-    }
+// 修改更新題庫的邏輯（從 TeacherAdmin 存檔後觸發）
+const updateQuestionBank = async (updatedQuestions: QuestionData[]) => {
+  // 1. 更新畫面並關閉備課中心
+  questionBank.value = updatedQuestions;
+  currentIndex.value = 0;
+  checkAndSetInitialStage();
+  showAdmin.value = false;
+
+  // 2. 存到本機備份（防斷網）
+  localStorage.setItem('custom_questions', JSON.stringify(updatedQuestions));
+
+  // 3. 存到雲端資料庫
+  const success = await CloudDatabase.saveQuestions(updatedQuestions);
+  if (!success) {
+    alert('注意：題庫已存在本機，但「雲端同步失敗」，請確認網路連線。');
   }
 };
 
