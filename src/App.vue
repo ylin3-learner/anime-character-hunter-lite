@@ -9,6 +9,7 @@ import PronunciationAnalyzer from './components/PronunciationAnalyzer.vue';
 import NoticingBoard from './components/NoticingBoard.vue';
 import SummaryReport from './components/SummaryReport.vue';
 import { defaultQuestions, type QuestionData } from './data/questions';
+import { useSound } from './utils/useSound';
 
 // 狀態管理
 const showAdmin = ref(false);
@@ -16,6 +17,9 @@ const currentIndex = ref(0);
 const questionBank = ref<QuestionData[]>([]);
 const currentStage = ref<'input' | 'macro' | 'micro' | 'success' | 'noticing'>('macro');
 const currentMode = ref<'relative' | 'preposition'>('relative');
+
+// 👇 修正：改為 playSuccess
+const { playSuccess } = useSound();
 
 // 👇 教師權限驗證狀態
 const showAdminAuth = ref(false);
@@ -28,6 +32,7 @@ const showSummary = ref(false);
 const completedCount = ref(0);
 
 onMounted(() => {
+  // 👇 移除 unlockAudio 相關邏輯，交給 useSound.ts 處理
   const saved = localStorage.getItem('custom_questions');
   if (saved) {
     try {
@@ -52,7 +57,7 @@ const checkAndSetInitialStage = () => {
     currentStage.value = 'macro';
     return;
   }
-  
+
   if (getEnabledStages.value.includes('input') && currentQuestion.value.inputData) {
     currentStage.value = 'input';
   } else if (getEnabledStages.value.includes('macro')) {
@@ -99,6 +104,9 @@ const handleUnpack = (type: 'relative' | 'preposition') => {
 };
 
 const handleSuccess = () => {
+  // 👇 修正：呼叫 playSuccess
+  playSuccess();
+
   currentStage.value = 'success';
   if (completedCount.value <= currentIndex.value) {
     completedCount.value = currentIndex.value + 1;
@@ -195,7 +203,8 @@ const verifyAdmin = () => {
 
     <main class="game-card" :key="currentQuestion.id + currentMode">
       <!-- 意識提升歸納板 -->
-      <div v-if="currentStage === 'noticing' && currentQuestion.noticingData" class="stage-content" style="justify-content: center;">
+      <div v-if="currentStage === 'noticing' && currentQuestion.noticingData" class="stage-content"
+        style="justify-content: center;">
         <NoticingBoard :data="currentQuestion.noticingData" @complete="handleNoticingComplete" />
       </div>
 
@@ -204,18 +213,13 @@ const verifyAdmin = () => {
         <div class="confetti">🎉 ✨ 🏆</div>
         <h2>角色解鎖成功！</h2>
 
-        <PronunciationAnalyzer 
-          v-if="getEnabledStages.includes('pronunciation')"
-          :targetSentence="fullSentenceData.target" 
-          :displaySentence="fullSentenceData.display"
-          :highlightPart="fullSentenceData.modifier" 
-          @skip="nextQuestion"
-        />
+        <PronunciationAnalyzer v-if="getEnabledStages.includes('pronunciation')"
+          :targetSentence="fullSentenceData.target" :displaySentence="fullSentenceData.display"
+          :highlightPart="fullSentenceData.modifier" @skip="nextQuestion" />
         <p v-else class="skip-hint">已略過語音練習。</p>
 
         <button class="btn-primary mt-4" @click="nextQuestion">
-          {{ currentIndex < questionBank.length - 1 ? '下一關 ➔' : '完成練習 🏁' }} 
-        </button>
+          {{ currentIndex < questionBank.length - 1 ? '下一關 ➔' : '完成練習 🏁' }} </button>
       </div>
 
       <!-- 對比題型 -->
@@ -227,13 +231,16 @@ const verifyAdmin = () => {
           :modifierLabel="currentQuestion.grammarFeature.relative.label"
           :tiles="currentQuestion.grammarFeature.relative.tiles"
           :correctAnswer="currentQuestion.grammarFeature.relative.correctAnswer"
-          :antecedent="currentQuestion.antecedent" @success="handleSuccess" />
+          :antecedent="currentQuestion.antecedent" :layout="currentQuestion.contrastData.layout"
+          :explanationTitle="currentQuestion.explanation?.title" :explanationDesc="currentQuestion.explanation?.desc"
+          @success="handleSuccess" />
       </div>
 
       <!-- 標準題型 -->
       <template v-else>
         <div v-if="currentStage === 'input' && currentQuestion.inputData" class="stage-content">
-          <StructuredInput :audioText="currentQuestion.inputData.audioText" :options="currentQuestion.inputData.options" @success="handleInputSuccess" />
+          <StructuredInput :audioText="currentQuestion.inputData.audioText" :options="currentQuestion.inputData.options"
+            @success="handleInputSuccess" />
         </div>
 
         <div v-else-if="currentStage === 'macro'" class="stage-content">
@@ -246,25 +253,17 @@ const verifyAdmin = () => {
         <div v-else-if="currentStage === 'micro'" class="stage-content">
           <h2 class="instruction">圖塊已解鎖！請排列出正確的字序。</h2>
           <div class="target-noun"><span class="highlight">{{ currentQuestion.targetNoun }}</span></div>
-          <MicroTileUnscramble 
-            :initialTiles="currentQuestion.grammarFeature[currentMode].tiles"
+          <MicroTileUnscramble :initialTiles="currentQuestion.grammarFeature[currentMode].tiles"
             :antecedent="currentQuestion.antecedent"
-            :correctAnswer="currentQuestion.grammarFeature[currentMode].correctAnswer" 
-            @success="handleSuccess"
-            @misconception="handleMisconception"
-          />
+            :correctAnswer="currentQuestion.grammarFeature[currentMode].correctAnswer" @success="handleSuccess"
+            @misconception="handleMisconception" />
         </div>
       </template>
     </main>
 
     <!-- 總結報告彈窗 -->
-    <SummaryReport 
-      v-if="showSummary" 
-      :completedLevels="completedCount" 
-      :totalLevels="questionBank.length" 
-      :misconceptions="sessionLog"
-      @restart="restartGame"
-    />
+    <SummaryReport v-if="showSummary" :completedLevels="completedCount" :totalLevels="questionBank.length"
+      :misconceptions="sessionLog" @restart="restartGame" />
 
     <!-- 👇 教師密碼驗證彈窗 -->
     <div v-if="showAdminAuth" class="auth-overlay">
@@ -272,12 +271,7 @@ const verifyAdmin = () => {
         <h3>👩‍🏫 教師驗證</h3>
         <p>請輸入密碼以進入備課中心</p>
         <!-- 預設密碼: admin123 -->
-        <input 
-          type="password" 
-          v-model="adminPasswordInput" 
-          placeholder=""  
-          @keyup.enter="verifyAdmin" 
-        />
+        <input type="password" v-model="adminPasswordInput" placeholder="" @keyup.enter="verifyAdmin" />
         <div class="auth-actions">
           <button class="btn-cancel" @click="showAdminAuth = false">取消</button>
           <button class="btn-confirm" @click="verifyAdmin">確認</button>
@@ -285,44 +279,275 @@ const verifyAdmin = () => {
       </div>
     </div>
 
-    <TeacherAdmin v-if="showAdmin" :currentQuestions="questionBank" @update="updateQuestionBank" @close="showAdmin = false" />
+    <TeacherAdmin v-if="showAdmin" :currentQuestions="questionBank" @update="updateQuestionBank"
+      @close="showAdmin = false" />
   </div>
 </template>
 
 <style scoped>
-.app-container { max-width: 800px; margin: 0 auto; padding: 40px 20px; min-height: 100vh; display: flex; flex-direction: column; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-header { text-align: center; margin-bottom: 30px; }
-header h1 { color: #1cb0f6; font-size: 2.2rem; letter-spacing: -0.5px; margin: 0 0 16px 0; font-weight: 800; }
-.header-controls { display: flex; justify-content: center; align-items: center; gap: 16px; flex-wrap: wrap; }
-.progress-bar { padding: 8px 20px; background: #e6f7ff; color: #1cb0f6; border-radius: 20px; font-weight: bold; font-size: 0.95rem; }
-.btn-finish { background: #58cc02; color: white; border: none; border-bottom: 4px solid #46a302; padding: 8px 20px; border-radius: 12px; font-weight: bold; cursor: pointer; transition: all 0.1s; }
-.btn-finish:active { border-bottom-width: 0; transform: translateY(4px); }
-.btn-admin { background: #ffc800; color: #fff; border: none; border-bottom: 4px solid #e5b200; padding: 8px 20px; border-radius: 12px; font-weight: bold; cursor: pointer; transition: all 0.1s; }
-.btn-admin:active { border-bottom-width: 0; transform: translateY(4px); }
-.game-card { background: white; border-radius: 24px; padding: 40px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.08); border: 2px solid #e5e5e5; flex: 1; display: flex; flex-direction: column; }
-.stage-content { display: flex; flex-direction: column; flex: 1; }
-.instruction { text-align: center; color: #777; font-size: 1.1rem; margin: 0 0 24px 0; }
-.target-noun { text-align: center; font-size: 2rem; font-weight: 800; margin-bottom: 30px; color: #333; }
-.highlight { color: #1cb0f6; }
-.success-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; text-align: center; animation: popIn 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275); padding: 20px 0; }
-.confetti { font-size: 5rem; margin-bottom: 16px; animation: bounce 1s infinite alternate; }
-@keyframes bounce { 0% { transform: translateY(0); } 100% { transform: translateY(-10px); } }
-.success-screen h2 { color: #58cc02; font-size: 2.2rem; margin: 0 0 24px 0; font-weight: 800; }
-.btn-primary { background-color: #58cc02; color: white; border: none; border-bottom: 5px solid #46a302; padding: 16px 48px; font-size: 1.2rem; font-weight: bold; border-radius: 16px; cursor: pointer; transition: all 0.1s; margin-top: 20px; }
-.btn-primary:active { border-bottom-width: 0; transform: translateY(5px); }
-.skip-hint { color: #999; font-size: 0.95rem; margin-bottom: 24px; }
-@keyframes popIn { 0% { transform: scale(0.9); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+.app-container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 40px 20px;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+header {
+  text-align: center;
+  margin-bottom: 30px;
+}
+
+header h1 {
+  color: #1cb0f6;
+  font-size: 2.2rem;
+  letter-spacing: -0.5px;
+  margin: 0 0 16px 0;
+  font-weight: 800;
+}
+
+.header-controls {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.progress-bar {
+  padding: 8px 20px;
+  background: #e6f7ff;
+  color: #1cb0f6;
+  border-radius: 20px;
+  font-weight: bold;
+  font-size: 0.95rem;
+}
+
+.btn-finish {
+  background: #58cc02;
+  color: white;
+  border: none;
+  border-bottom: 4px solid #46a302;
+  padding: 8px 20px;
+  border-radius: 12px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.1s;
+}
+
+.btn-finish:active {
+  border-bottom-width: 0;
+  transform: translateY(4px);
+}
+
+.btn-admin {
+  background: #ffc800;
+  color: #fff;
+  border: none;
+  border-bottom: 4px solid #e5b200;
+  padding: 8px 20px;
+  border-radius: 12px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.1s;
+}
+
+.btn-admin:active {
+  border-bottom-width: 0;
+  transform: translateY(4px);
+}
+
+.game-card {
+  background: white;
+  border-radius: 24px;
+  padding: 40px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.08);
+  border: 2px solid #e5e5e5;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.stage-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.instruction {
+  text-align: center;
+  color: #777;
+  font-size: 1.1rem;
+  margin: 0 0 24px 0;
+}
+
+.target-noun {
+  text-align: center;
+  font-size: 2rem;
+  font-weight: 800;
+  margin-bottom: 30px;
+  color: #333;
+}
+
+.highlight {
+  color: #1cb0f6;
+}
+
+.success-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  text-align: center;
+  animation: popIn 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  padding: 20px 0;
+}
+
+.confetti {
+  font-size: 5rem;
+  margin-bottom: 16px;
+  animation: bounce 1s infinite alternate;
+}
+
+@keyframes bounce {
+  0% {
+    transform: translateY(0);
+  }
+
+  100% {
+    transform: translateY(-10px);
+  }
+}
+
+.success-screen h2 {
+  color: #58cc02;
+  font-size: 2.2rem;
+  margin: 0 0 24px 0;
+  font-weight: 800;
+}
+
+.btn-primary {
+  background-color: #58cc02;
+  color: white;
+  border: none;
+  border-bottom: 5px solid #46a302;
+  padding: 16px 48px;
+  font-size: 1.2rem;
+  font-weight: bold;
+  border-radius: 16px;
+  cursor: pointer;
+  transition: all 0.1s;
+  margin-top: 20px;
+}
+
+.btn-primary:active {
+  border-bottom-width: 0;
+  transform: translateY(5px);
+}
+
+.skip-hint {
+  color: #999;
+  font-size: 0.95rem;
+  margin-bottom: 24px;
+}
+
+@keyframes popIn {
+  0% {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
 
 /* 👇 教師驗證彈窗樣式 */
-.auth-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 10001; backdrop-filter: blur(4px); }
-.auth-card { background: white; padding: 32px; border-radius: 24px; text-align: center; width: 320px; box-shadow: 0 12px 32px rgba(0,0,0,0.2); animation: popIn 0.3s; }
-.auth-card h3 { margin: 0 0 8px 0; color: #333; font-size: 1.5rem; }
-.auth-card p { color: #777; font-size: 0.9rem; margin-bottom: 20px; }
-.auth-card input { width: 100%; padding: 14px; border: 2px solid #e5e5e5; border-radius: 12px; font-size: 1rem; box-sizing: border-box; margin-bottom: 20px; outline: none; transition: border 0.2s; }
-.auth-card input:focus { border-color: #1cb0f6; }
-.auth-actions { display: flex; gap: 12px; }
-.auth-actions button { flex: 1; padding: 14px; border-radius: 12px; font-weight: bold; cursor: pointer; border: none; transition: all 0.1s; font-size: 1rem;}
-.btn-cancel { background: #f0f0f0; color: #777; }
-.btn-confirm { background: #1cb0f6; color: white; border-bottom: 4px solid #1899d6; }
-.btn-confirm:active { border-bottom-width: 0; transform: translateY(4px); }
+.auth-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 10001;
+  backdrop-filter: blur(4px);
+}
+
+.auth-card {
+  background: white;
+  padding: 32px;
+  border-radius: 24px;
+  text-align: center;
+  width: 320px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
+  animation: popIn 0.3s;
+}
+
+.auth-card h3 {
+  margin: 0 0 8px 0;
+  color: #333;
+  font-size: 1.5rem;
+}
+
+.auth-card p {
+  color: #777;
+  font-size: 0.9rem;
+  margin-bottom: 20px;
+}
+
+.auth-card input {
+  width: 100%;
+  padding: 14px;
+  border: 2px solid #e5e5e5;
+  border-radius: 12px;
+  font-size: 1rem;
+  box-sizing: border-box;
+  margin-bottom: 20px;
+  outline: none;
+  transition: border 0.2s;
+}
+
+.auth-card input:focus {
+  border-color: #1cb0f6;
+}
+
+.auth-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.auth-actions button {
+  flex: 1;
+  padding: 14px;
+  border-radius: 12px;
+  font-weight: bold;
+  cursor: pointer;
+  border: none;
+  transition: all 0.1s;
+  font-size: 1rem;
+}
+
+.btn-cancel {
+  background: #f0f0f0;
+  color: #777;
+}
+
+.btn-confirm {
+  background: #1cb0f6;
+  color: white;
+  border-bottom: 4px solid #1899d6;
+}
+
+.btn-confirm:active {
+  border-bottom-width: 0;
+  transform: translateY(4px);
+}
 </style>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
+import { useSound } from '../utils/useSound';
 
 const props = defineProps<{
   data: {
@@ -15,16 +16,21 @@ const emit = defineEmits<{ (e: 'complete'): void }>();
 const selectedIndex = ref<number | null>(null);
 const isCorrect = ref(false);
 
+const { playSuccess } = useSound();
+const { playError } = useSound();
+
 const handleSelect = (index: number) => {
   if (isCorrect.value) return;
   selectedIndex.value = index;
-  
+
   if (props.data.options[index].isCorrect) {
     isCorrect.value = true;
+    playSuccess(); // 答對時播放音效
   } else {
     // 答錯時給予抖動反饋，並在 0.5 秒後重置
-    setTimeout(() => { 
-      if (!isCorrect.value) selectedIndex.value = null; 
+    playError();
+    setTimeout(() => {
+      if (!isCorrect.value) selectedIndex.value = null;
     }, 500);
   }
 };
@@ -46,16 +52,10 @@ const handleSelect = (index: number) => {
     <div class="question-box">
       <h3>{{ data.question }}</h3>
       <div class="options">
-        <button
-          v-for="(opt, index) in data.options"
-          :key="index"
-          class="option-btn"
-          :class="{
-            'correct': isCorrect && opt.isCorrect,
-            'wrong': selectedIndex === index && !opt.isCorrect
-          }"
-          @click="handleSelect(index)"
-        >
+        <button v-for="(opt, index) in data.options" :key="index" class="option-btn" :class="{
+          'correct': isCorrect && opt.isCorrect,
+          'wrong': selectedIndex === index && !opt.isCorrect
+        }" @click="handleSelect(index)">
           {{ opt.text }}
         </button>
       </div>
@@ -83,8 +83,17 @@ const handleSelect = (index: number) => {
   animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
-h2 { color: #1cb0f6; font-size: 1.8rem; margin-bottom: 8px; }
-.subtitle { color: #777; margin-bottom: 24px; font-weight: 500; }
+h2 {
+  color: #1cb0f6;
+  font-size: 1.8rem;
+  margin-bottom: 8px;
+}
+
+.subtitle {
+  color: #777;
+  margin-bottom: 24px;
+  font-weight: 500;
+}
 
 .examples {
   background: #f9f9f9;
@@ -103,7 +112,11 @@ h2 { color: #1cb0f6; font-size: 1.8rem; margin-bottom: 8px; }
   font-weight: bold;
 }
 
-.question-box h3 { font-size: 1.2rem; color: #333; margin-bottom: 16px; }
+.question-box h3 {
+  font-size: 1.2rem;
+  color: #333;
+  margin-bottom: 16px;
+}
 
 .options {
   display: flex;
@@ -124,9 +137,24 @@ h2 { color: #1cb0f6; font-size: 1.8rem; margin-bottom: 8px; }
   transition: all 0.2s;
   color: #555;
 }
-.option-btn:hover { border-color: #1cb0f6; color: #1cb0f6; }
-.option-btn.correct { background: #d7ffb8; border-color: #58cc02; color: #58cc02; }
-.option-btn.wrong { background: #ffdfe0; border-color: #ff4b4b; color: #ea2b2b; animation: shake 0.4s; }
+
+.option-btn:hover {
+  border-color: #1cb0f6;
+  color: #1cb0f6;
+}
+
+.option-btn.correct {
+  background: #d7ffb8;
+  border-color: #58cc02;
+  color: #58cc02;
+}
+
+.option-btn.wrong {
+  background: #ffdfe0;
+  border-color: #ff4b4b;
+  color: #ea2b2b;
+  animation: shake 0.4s;
+}
 
 .explanation {
   background: #f0fff0;
@@ -138,7 +166,13 @@ h2 { color: #1cb0f6; font-size: 1.8rem; margin-bottom: 8px; }
   animation: fadeIn 0.4s;
 }
 
-.explanation p { color: #333; font-size: 1.1rem; margin-bottom: 20px; font-weight: bold; line-height: 1.5; }
+.explanation p {
+  color: #333;
+  font-size: 1.1rem;
+  margin-bottom: 20px;
+  font-weight: bold;
+  line-height: 1.5;
+}
 
 .btn-continue {
   background: #58cc02;
@@ -152,21 +186,55 @@ h2 { color: #1cb0f6; font-size: 1.8rem; margin-bottom: 8px; }
   cursor: pointer;
   width: 100%;
 }
-.btn-continue:active { border-bottom-width: 0; transform: translateY(4px); }
+
+.btn-continue:active {
+  border-bottom-width: 0;
+  transform: translateY(4px);
+}
 
 @keyframes shake {
-  10%, 90% { transform: translateX(-2px); }
-  20%, 80% { transform: translateX(4px); }
-  30%, 50%, 70% { transform: translateX(-8px); }
-  40%, 60% { transform: translateX(8px); }
+
+  10%,
+  90% {
+    transform: translateX(-2px);
+  }
+
+  20%,
+  80% {
+    transform: translateX(4px);
+  }
+
+  30%,
+  50%,
+  70% {
+    transform: translateX(-8px);
+  }
+
+  40%,
+  60% {
+    transform: translateX(8px);
+  }
 }
 
 @keyframes popIn {
-  0% { transform: scale(0.9); opacity: 0; }
-  100% { transform: scale(1); opacity: 1; }
+  0% {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
+
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 </style>

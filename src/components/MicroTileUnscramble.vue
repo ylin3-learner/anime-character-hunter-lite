@@ -2,6 +2,9 @@
 import { ref, watch } from 'vue';
 import { validatePostModifier } from '../rules/grammarRules';
 import type { Antecedent, DiagnosticSignal } from '../rules/types';
+import { useSound } from '../utils/useSound'; // 引入音效
+
+const { playError } = useSound();
 
 const props = defineProps<{
   initialTiles: string[];
@@ -44,26 +47,34 @@ const unselectTile = (tile: { id: number; text: string }) => {
 watch(
   answerArea,
   (newVal) => {
-    if (newVal.length === props.initialTiles.length) {
+    // 👇 核心修正：當作答區的數量等於「正確答案的長度」時，才進行驗證
+    if (newVal.length === props.correctAnswer.length) {
       const tileTexts = newVal.map(t => t.text);
       
+      // 1. 跑迷思檢查
       signals.value = validatePostModifier(tileTexts, props.antecedent);
       
-      // 👇 當有迷思時，向上回報
       if (signals.value.length > 0) {
+        playError(); 
         signals.value.forEach(s => {
           emit('misconception', s.code);
         });
       }
       
+      // 2. 檢查字序是否完全正確
       const isOrderCorrect = tileTexts.join(' ') === props.correctAnswer.join(' ');
 
       if (signals.value.length === 0 && isOrderCorrect) {
+        // 全對！通關
         isSuccess.value = true;
         setTimeout(() => emit('success'), 1000);
       } else if (signals.value.length === 0 && !isOrderCorrect) {
+        // 錯排，但沒有踩到迷思雷，觸發抖動反饋
+        playError();
         isWrong.value = true;
-        setTimeout(() => { isWrong.value = false; }, 500);
+        setTimeout(() => {
+          isWrong.value = false;
+        }, 500); 
       }
     } else {
       signals.value = [];
@@ -93,7 +104,7 @@ const isError = (index: number) => signals.value.some(s => s.index === index);
         <p v-for="s in signals" :key="s.code">{{ s.message }}</p>
       </div>
     </div>
-    
+
     <div v-else-if="isWrong" class="gentle-alert">
       <p>順序好像不太對喔，點擊字磚退回重排看看！</p>
     </div>
@@ -108,23 +119,154 @@ const isError = (index: number) => signals.value.some(s => s.index === index);
 
 <style scoped>
 /* 請保留你原本的樣式 */
-.micro-tile-game { display: flex; flex-direction: column; gap: 20px; min-height: 300px; }
-.answer-area, .word-bank { display: flex; flex-wrap: wrap; gap: 12px; min-height: 80px; padding: 16px; border-radius: 16px; transition: all 0.3s; }
-.answer-area { border-bottom: 4px dashed #e5e5e5; background: #fdfdfd; }
-.answer-area.success-bg { border-bottom-color: #58cc02; background: #f0fff0; }
-.word-bank { border: 2px solid #e5e5e5; background: #ffffff; }
-.tile { padding: 12px 20px; background-color: #ffffff; border: 2px solid #e5e5e5; border-bottom-width: 4px; border-radius: 12px; cursor: pointer; user-select: none; font-size: 1.2rem; font-weight: 600; color: #4b4b4b; transition: all 0.1s; }
-.tile:hover { background-color: #f7f7f7; }
-.tile:active { border-bottom-width: 2px; transform: translateY(2px); }
-.tile-error { background-color: #ffdfe0; border-color: #ff4b4b; color: #ea2b2b; }
-.tile-success { background-color: #d7ffb8; border-color: #58cc02; color: #58cc02; }
-.tile-wrong { background-color: #fff3e0; border-color: #ff9800; color: #e65100; }
-.alert-bubble { display: flex; gap: 12px; background-color: #ffdfe0; color: #ea2b2b; padding: 16px; border-radius: 12px; border: 2px solid #ff4b4b; font-weight: 500; animation: slideDown 0.3s ease-out; }
-.alert-icon { font-size: 1.5rem; }
-.alert-messages p { margin: 0 0 4px 0; }
-.gentle-alert { text-align: center; color: #ff9800; font-weight: bold; animation: fadeIn 0.3s ease-out; }
-.shake { animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both; }
-@keyframes shake { 10%, 90% { transform: translate3d(-2px, 0, 0); } 20%, 80% { transform: translate3d(4px, 0, 0); } 30%, 50%, 70% { transform: translate3d(-8px, 0, 0); } 40%, 60% { transform: translate3d(8px, 0, 0); } }
-@keyframes slideDown { from { transform: translateY(-10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.micro-tile-game {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-height: 300px;
+}
+
+.answer-area,
+.word-bank {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-height: 80px;
+  padding: 16px;
+  border-radius: 16px;
+  transition: all 0.3s;
+}
+
+.answer-area {
+  border-bottom: 4px dashed #e5e5e5;
+  background: #fdfdfd;
+}
+
+.answer-area.success-bg {
+  border-bottom-color: #58cc02;
+  background: #f0fff0;
+}
+
+.word-bank {
+  border: 2px solid #e5e5e5;
+  background: #ffffff;
+}
+
+.tile {
+  padding: 12px 20px;
+  background-color: #ffffff;
+  border: 2px solid #e5e5e5;
+  border-bottom-width: 4px;
+  border-radius: 12px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: #4b4b4b;
+  transition: all 0.1s;
+}
+
+.tile:hover {
+  background-color: #f7f7f7;
+}
+
+.tile:active {
+  border-bottom-width: 2px;
+  transform: translateY(2px);
+}
+
+.tile-error {
+  background-color: #ffdfe0;
+  border-color: #ff4b4b;
+  color: #ea2b2b;
+}
+
+.tile-success {
+  background-color: #d7ffb8;
+  border-color: #58cc02;
+  color: #58cc02;
+}
+
+.tile-wrong {
+  background-color: #fff3e0;
+  border-color: #ff9800;
+  color: #e65100;
+}
+
+.alert-bubble {
+  display: flex;
+  gap: 12px;
+  background-color: #ffdfe0;
+  color: #ea2b2b;
+  padding: 16px;
+  border-radius: 12px;
+  border: 2px solid #ff4b4b;
+  font-weight: 500;
+  animation: slideDown 0.3s ease-out;
+}
+
+.alert-icon {
+  font-size: 1.5rem;
+}
+
+.alert-messages p {
+  margin: 0 0 4px 0;
+}
+
+.gentle-alert {
+  text-align: center;
+  color: #ff9800;
+  font-weight: bold;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.shake {
+  animation: shake 0.4s cubic-bezier(.36, .07, .19, .97) both;
+}
+
+@keyframes shake {
+
+  10%,
+  90% {
+    transform: translate3d(-2px, 0, 0);
+  }
+
+  20%,
+  80% {
+    transform: translate3d(4px, 0, 0);
+  }
+
+  30%,
+  50%,
+  70% {
+    transform: translate3d(-8px, 0, 0);
+  }
+
+  40%,
+  60% {
+    transform: translate3d(8px, 0, 0);
+  }
+}
+
+@keyframes slideDown {
+  from {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
 </style>

@@ -8,13 +8,27 @@ export interface QuestionData {
     person: 'person' | 'thing';
   };
   imageUrl: string;
-  // 👇 新增：模組化開關 (若 undefined 則預設全開)
   enabledStages?: ('input' | 'macro' | 'micro' | 'pronunciation' | 'noticing')[];
   
   grammarFeature: {
-    relative: { label: string; tiles: string[]; correctAnswer: string[] };
-    preposition: { label: string; tiles: string[]; correctAnswer: string[] };
+    relative: { 
+      label: string; 
+      tiles: string[]; 
+      correctAnswer: string[];
+      distractors?: string[];
+    };
+    preposition: { 
+      label: string; 
+      tiles: string[]; 
+      correctAnswer: string[]; 
+    };
   };
+  
+  explanation?: {
+    title: string;
+    desc: string;
+  };
+
   inputData?: {
     audioText: string;
     options: { image: string; text: string; isCorrect: boolean }[];
@@ -30,6 +44,7 @@ export interface QuestionData {
     chineseHighlight: string;
     nounImage: string;
     modifierImage: string;
+    layout?: 'modifier-left' | 'modifier-right';
   };
 }
 
@@ -40,18 +55,23 @@ export const defaultQuestions: QuestionData[] = [
     targetNoun: 'The girl',
     antecedent: { noun: 'The girl', number: 'singular', person: 'person' },
     imageUrl: 'https://api.dicebear.com/7.x/adventurer/svg?seed=AnimeGirl',
-    enabledStages: ['input', 'macro', 'micro', 'pronunciation', 'noticing'], // 👈 預設全開
+    enabledStages: ['input', 'macro', 'micro', 'pronunciation', 'noticing'],
     grammarFeature: {
       relative: {
         label: 'who wears a blue uniform',
-        tiles: ['wears', 'uniform', 'who', 'blue', 'a'],
-        correctAnswer: ['who', 'wears', 'a', 'blue', 'uniform']
+        tiles: ['wears', 'uniform', 'who', 'blue', 'a', 'she'],
+        correctAnswer: ['who', 'wears', 'a', 'blue', 'uniform'],
+        distractors: ['she']
       },
       preposition: {
         label: 'in a blue uniform',
         tiles: ['uniform', 'in', 'blue', 'a'],
         correctAnswer: ['in', 'a', 'blue', 'uniform']
       }
+    },
+    explanation: {
+      title: '✨ 你發現了嗎？',
+      desc: '在英文中，修飾語要放在名詞的後面喔！'
     },
     inputData: {
       audioText: 'The girl who wears a blue uniform is my sister.',

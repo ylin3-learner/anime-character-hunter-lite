@@ -17,7 +17,6 @@ const localQuestions = ref<QuestionData[]>(JSON.parse(JSON.stringify(props.curre
 // 表單狀態
 const editingId = ref<string | null>(null);
 const questionType = ref<'standard' | 'contrast'>('standard');
-// 👇 新增階段開關狀態
 const enabledStages = ref<('input' | 'macro' | 'micro' | 'pronunciation' | 'noticing')[]>(['input', 'macro', 'micro', 'pronunciation', 'noticing']);
 
 const imageUrl = ref('');
@@ -28,10 +27,19 @@ const prepositionSentence = ref('');
 const chineseSentence = ref('');
 const chineseHighlight = ref('');
 const modifierImageUrl = ref('');
+const puzzleLayout = ref<'modifier-left' | 'modifier-right'>('modifier-left');
+
+// 干擾磚與解釋卡狀態
+const distractorsInput = ref('');
+const explanationTitle = ref('✨ 你發現了嗎？');
+const explanationDesc = ref('在英文中，修飾語要放在名詞的後面喔！');
 
 const fileInput = ref<HTMLInputElement | null>(null);
 const modifierFileInput = ref<HTMLInputElement | null>(null);
 const uploadTarget = ref<'noun' | 'modifier'>('noun');
+
+// 👇 核心修正：記錄當前使用者想要上傳圖片的目標
+const activeUploadTarget = ref<'noun' | 'modifier' | null>(null);
 
 const isEditing = computed(() => editingId.value !== null);
 
@@ -46,6 +54,11 @@ const resetForm = () => {
   chineseSentence.value = '';
   chineseHighlight.value = '';
   modifierImageUrl.value = '';
+  puzzleLayout.value = 'modifier-left';
+  distractorsInput.value = '';
+  explanationTitle.value = '✨ 你發現了嗎？';
+  explanationDesc.value = '在英文中，修飾語要放在名詞的後面喔！';
+  activeUploadTarget.value = null; // 重置意圖
 };
 
 const editQuestion = (q: QuestionData) => {
@@ -57,11 +70,17 @@ const editQuestion = (q: QuestionData) => {
   relativeSentence.value = q.grammarFeature.relative.label;
   prepositionSentence.value = q.grammarFeature.preposition.label;
 
+  distractorsInput.value = q.grammarFeature.relative.distractors?.join(', ') || '';
+  explanationTitle.value = q.explanation?.title || '✨ 你發現了嗎？';
+  explanationDesc.value = q.explanation?.desc || '在英文中，修飾語要放在名詞的後面喔！';
+
   if (q.contrastData) {
     chineseSentence.value = q.contrastData.chineseSentence;
     chineseHighlight.value = q.contrastData.chineseHighlight;
     modifierImageUrl.value = q.contrastData.modifierImage;
+    puzzleLayout.value = q.contrastData.layout || 'modifier-left';
   }
+  activeUploadTarget.value = null;
 };
 
 const deleteQuestion = (id: string) => {
@@ -71,7 +90,9 @@ const deleteQuestion = (id: string) => {
   }
 };
 
+// 👇 點擊上傳區時，記錄當前的意圖
 const triggerUpload = (target: 'noun' | 'modifier') => {
+  activeUploadTarget.value = target;
   uploadTarget.value = target;
   if (target === 'noun') fileInput.value?.click();
   else modifierFileInput.value?.click();
@@ -81,18 +102,36 @@ const handleFileChange = (event: Event) => {
   const target = event.target as HTMLInputElement;
   const file = target.files?.[0];
   if (file) processImage(file, uploadTarget.value);
+  // 選擇檔案後清空意圖，避免後續誤貼
+  activeUploadTarget.value = null;
 };
 
+// 👇 重寫 handlePaste：具備工業級防呆與路由
 const handlePaste = (event: ClipboardEvent) => {
   const items = event.clipboardData?.items;
   if (!items) return;
 
+  let hasImage = false;
+  for (const item of items) {
+    if (item.type.indexOf('image') !== -1) hasImage = true;
+  }
+
+  // 如果剪貼簿沒有圖片，直接放行（讓瀏覽器原生貼上文字）
+  if (!hasImage) return;
+
+  // 如果有圖片，但使用者沒有點擊任何圖片上傳區，就給予提示
+  if (!activeUploadTarget.value) {
+    alert('請先點擊「角色圖片」或「修飾語圖片」的框框，再按貼上喔！');
+    event.preventDefault();
+    return;
+  }
+
+  // 處理圖片貼上
   for (const item of items) {
     if (item.type.indexOf('image') !== -1) {
       const file = item.getAsFile();
       if (file) {
-        const target = (questionType.value === 'contrast' && imageUrl.value && !modifierImageUrl.value) ? 'modifier' : 'noun';
-        processImage(file, target);
+        processImage(file, activeUploadTarget.value);
         event.preventDefault();
         break;
       }
@@ -136,6 +175,8 @@ const processImage = (file: File, target: 'noun' | 'modifier') => {
       } else {
         modifierImageUrl.value = compressedBase64;
       }
+      // 貼上完成後清空意圖
+      activeUploadTarget.value = null;
     };
     img.src = e.target?.result as string;
   };
@@ -152,9 +193,23 @@ const saveQuestion = () => {
     return;
   }
 
-  const relTiles = generateTiles(relativeSentence.value);
-  const relCorrect = [...relTiles];
-  relTiles.sort(() => Math.random() - 0.5);
+  const relCorrect = generateTiles(relativeSentence.value);
+
+  let distractors = distractorsInput.value.split(/[,，\s]+/).filter(Boolean);
+
+  if (distractors.length === 0) {
+    const correctWords = relCorrect.map(w => w.toLowerCase());
+    if (correctWords.includes('who') || correctWords.includes('which')) {
+      distractors.push('she', 'it');
+    }
+    if (correctWords.includes('wears') || correctWords.includes('has')) {
+      distractors.push('wear', 'have');
+    }
+    distractors = [...new Set(distractors)].filter(d => !correctWords.includes(d.toLowerCase()));
+  }
+
+  const finalTiles = [...relCorrect, ...distractors];
+  finalTiles.sort(() => Math.random() - 0.5);
 
   const prepTiles = generateTiles(prepositionSentence.value || '');
   const prepCorrect = [...prepTiles];
@@ -170,10 +225,14 @@ const saveQuestion = () => {
       person: 'person'
     },
     imageUrl: imageUrl.value || 'https://api.dicebear.com/7.x/adventurer/svg?seed=default',
-    enabledStages: enabledStages.value, // 👈 儲存階段開關
+    enabledStages: enabledStages.value,
     grammarFeature: {
-      relative: { label: relativeSentence.value, tiles: relTiles, correctAnswer: relCorrect },
+      relative: { label: relativeSentence.value, tiles: finalTiles, correctAnswer: relCorrect, distractors },
       preposition: { label: prepositionSentence.value, tiles: prepTiles, correctAnswer: prepCorrect }
+    },
+    explanation: {
+      title: explanationTitle.value,
+      desc: explanationDesc.value
     },
     inputData: {
       audioText: `${targetNoun.value} ${relativeSentence.value} is my favorite.`,
@@ -201,7 +260,8 @@ const saveQuestion = () => {
       chineseSentence: chineseSentence.value || '中文句子',
       chineseHighlight: chineseHighlight.value || '高亮部分',
       nounImage: imageUrl.value || 'https://api.dicebear.com/7.x/adventurer/svg?seed=default',
-      modifierImage: modifierImageUrl.value || 'https://api.dicebear.com/7.x/shapes/svg?seed=default'
+      modifierImage: modifierImageUrl.value || 'https://api.dicebear.com/7.x/shapes/svg?seed=default',
+      layout: puzzleLayout.value
     };
   }
 
@@ -267,7 +327,6 @@ const saveAllAndClose = () => {
           </div>
 
           <div class="editor-body">
-            <!-- 👇 階段開關 UI -->
             <div class="form-group" v-if="questionType === 'standard'">
               <label>啟用教學階段 (可根據課堂時間自由勾選)</label>
               <div class="stage-checkboxes">
@@ -281,49 +340,97 @@ const saveAllAndClose = () => {
 
             <div class="form-group">
               <label>{{ questionType === 'contrast' ? '名詞圖片 (拼圖右側)' : '角色圖片' }}</label>
-              <div class="upload-area" @click="triggerUpload('noun')">
+              <!-- 👇 加上動態 class 提示當前選中的上傳區 -->
+              <div class="upload-area" :class="{ 'active-upload': activeUploadTarget === 'noun' }"
+                @click="triggerUpload('noun')">
                 <img v-if="imageUrl" :src="imageUrl" class="preview-img" />
-                <div v-else class="upload-placeholder"><span class="icon">📸</span><span>點擊選擇圖片，或貼上截圖</span></div>
+                <div v-else class="upload-placeholder">
+                  <span class="icon">📸</span>
+                  <span>點擊後「貼上截圖」或選擇圖片</span>
+                  <!-- 👇 動態提示文字 -->
+                  <span v-if="activeUploadTarget === 'noun'" class="text-success">✅ 已就緒！請按 Ctrl+V 貼上</span>
+                  <span v-else>點擊此處選擇圖片，或按 Ctrl+V 貼上</span>
+                </div>
               </div>
               <input ref="fileInput" type="file" accept="image/*" style="display: none" @change="handleFileChange" />
             </div>
 
             <div class="form-group" v-if="questionType === 'contrast'">
               <label>修飾語圖片 (拼圖左側)</label>
-              <div class="upload-area" @click="triggerUpload('modifier')">
+              <!-- 👇 加上動態 class 提示當前選中的上傳區 -->
+              <div class="upload-area" :class="{ 'active-upload': activeUploadTarget === 'modifier' }"
+                @click="triggerUpload('modifier')">
                 <img v-if="modifierImageUrl" :src="modifierImageUrl" class="preview-img" />
-                <div v-else class="upload-placeholder"><span class="icon">🧩</span><span>點擊選擇圖片，或貼上截圖</span></div>
+                <div v-else class="upload-placeholder">
+                  <span class="icon">🧩</span>
+                  <span>點擊後「貼上截圖」或選擇圖片</span>
+                  <!-- 👇 動態提示文字 -->
+                  <span v-if="activeUploadTarget === 'noun'" class="text-success">✅ 已就緒！請按 Ctrl+V 貼上</span>
+                  <span v-else>點擊此處選擇圖片，或按 Ctrl+V 貼上</span>
+                </div>
               </div>
               <input ref="modifierFileInput" type="file" accept="image/*" style="display: none"
                 @change="handleFileChange" />
             </div>
 
+            <!-- 👇 點擊輸入框時，清除上傳意圖 -->
             <div class="form-row">
               <div class="form-group">
                 <label>目標名詞</label>
-                <input v-model="targetNoun" type="text" placeholder="Ex: The girl" />
+                <input v-model="targetNoun" type="text" placeholder="Ex: The girl" @focus="activeUploadTarget = null" />
               </div>
             </div>
 
             <div class="form-group">
               <label>句型 A：關係子句 (Relative Clause)</label>
-              <input v-model="relativeSentence" type="text" placeholder="Ex: who wears a blue uniform" />
+              <input v-model="relativeSentence" type="text" placeholder="Ex: who wears a blue uniform"
+                @focus="activeUploadTarget = null" />
+            </div>
+
+            <div class="form-group">
+              <label>迷思干擾磚 (選填，若空白系統會自動生成，例: she, which)</label>
+              <input v-model="distractorsInput" type="text" placeholder="Ex: she, which, wear"
+                @focus="activeUploadTarget = null" />
             </div>
 
             <template v-if="questionType === 'contrast'">
               <div class="form-group">
                 <label>中文句子</label>
-                <input v-model="chineseSentence" type="text" placeholder="Ex: 穿藍色制服的女孩" />
+                <input v-model="chineseSentence" type="text" placeholder="Ex: 穿藍色制服的女孩"
+                  @focus="activeUploadTarget = null" />
               </div>
               <div class="form-group">
                 <label>中文高亮 (修飾語部分)</label>
-                <input v-model="chineseHighlight" type="text" placeholder="Ex: 穿藍色制服的" />
+                <input v-model="chineseHighlight" type="text" placeholder="Ex: 穿藍色制服的"
+                  @focus="activeUploadTarget = null" />
+              </div>
+
+              <div class="form-group">
+                <label>拼圖排列方向</label>
+                <div class="type-switcher">
+                  <button :class="{ active: puzzleLayout === 'modifier-left' }"
+                    @click="puzzleLayout = 'modifier-left'">佈局 A (修飾語在左)</button>
+                  <button :class="{ active: puzzleLayout === 'modifier-right' }"
+                    @click="puzzleLayout = 'modifier-right'">佈局 B (修飾語在右)</button>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label>解釋卡標題</label>
+                <input v-model="explanationTitle" type="text" placeholder="Ex: ✨ 你發現了嗎？"
+                  @focus="activeUploadTarget = null" />
+              </div>
+              <div class="form-group">
+                <label>解釋卡說明</label>
+                <input v-model="explanationDesc" type="text" placeholder="Ex: 在英文中，修飾語要放在名詞的後面喔！"
+                  @focus="activeUploadTarget = null" />
               </div>
             </template>
 
             <div class="form-group" v-else>
               <label>句型 B：介系詞片語 (Prepositional Phrase)</label>
-              <input v-model="prepositionSentence" type="text" placeholder="Ex: in a blue uniform" />
+              <input v-model="prepositionSentence" type="text" placeholder="Ex: in a blue uniform"
+                @focus="activeUploadTarget = null" />
             </div>
           </div>
 
@@ -338,8 +445,7 @@ const saveAllAndClose = () => {
 </template>
 
 <style scoped>
-/* 樣式保持不變，新增 checkboxes 樣式 */
-/* ... 之前的樣式 ... */
+/* 原有樣式保持不變，新增 active-upload 的提示樣式 */
 .stage-checkboxes {
   display: flex;
   flex-wrap: wrap;
@@ -349,6 +455,7 @@ const saveAllAndClose = () => {
   border-radius: 12px;
   border: 2px solid #e5e5e5;
 }
+
 .stage-checkboxes label {
   display: flex;
   align-items: center;
@@ -358,59 +465,402 @@ const saveAllAndClose = () => {
   cursor: pointer;
   margin-bottom: 0;
 }
+
 .stage-checkboxes input {
   width: 18px;
   height: 18px;
   accent-color: #1cb0f6;
   cursor: pointer;
 }
-/* 以下保留你原本的樣式... */
-.admin-modal { position: fixed; top: 0; left: 0; right: 0; bottom: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.5); display: flex; justify-content: center; align-items: center; z-index: 9999; backdrop-filter: blur(4px); }
-.admin-layout { display: flex; width: 90vw; max-width: 1000px; height: 85vh; background: #ffffff; border-radius: 24px; overflow: hidden; box-shadow: 0 24px 48px rgba(0, 0, 0, 0.2); animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
-@keyframes popIn { 0% { transform: scale(0.95); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
-.sidebar { width: 320px; background: #f7f9fc; border-right: 2px solid #e5e5e5; display: flex; flex-direction: column; }
-.sidebar-header { padding: 24px; border-bottom: 2px solid #e5e5e5; }
-.sidebar-header h2 { margin: 0 0 8px 0; font-size: 1.2rem; color: #1cb0f6; }
-.sidebar-header p { margin: 0; font-size: 0.85rem; color: #777; line-height: 1.5; }
-.question-list { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
-.question-item { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 16px; background: #ffffff; border: 2px solid #e5e5e5; border-radius: 16px; cursor: pointer; transition: all 0.2s; }
-.question-item:hover { border-color: #1cb0f6; transform: translateY(-2px); }
-.question-item.active { border-color: #1cb0f6; background: #e6f7ff; box-shadow: 0 4px 12px rgba(28, 176, 246, 0.1); }
-.q-index { font-size: 0.75rem; color: #1cb0f6; font-weight: bold; display: flex; align-items: center; }
-.q-content { display: flex; flex-direction: column; gap: 2px; padding-right: 20px; }
-.q-noun { font-weight: bold; color: #333; font-size: 1.05rem; }
-.q-desc { font-size: 0.85rem; color: #777; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.q-type-tag { font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; margin-left: 6px; color: white; }
-.q-type-tag.standard { background: #1cb0f6; }
-.q-type-tag.contrast { background: #ff9800; }
-.btn-delete { position: absolute; top: 16px; right: 16px; background: #ffdfe0; color: #ff4b4b; border: none; width: 24px; height: 24px; border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 0.8rem; cursor: pointer; opacity: 0; transition: opacity 0.2s; }
-.question-item:hover .btn-delete { opacity: 1; }
-.btn-new { padding: 16px; background: transparent; border: 2px dashed #ccc; border-radius: 16px; color: #777; font-weight: bold; font-size: 1rem; cursor: pointer; transition: all 0.2s; }
-.btn-new:hover { border-color: #58cc02; color: #58cc02; background: #f0fff0; }
-.btn-new.active { border-color: #58cc02; color: #58cc02; background: #f0fff0; }
-.sidebar-footer { padding: 24px; background: #ffffff; border-top: 2px solid #e5e5e5; }
-.btn-close { width: 100%; padding: 16px; background: #1cb0f6; color: white; border: none; border-bottom: 4px solid #1899d6; border-radius: 16px; font-weight: bold; font-size: 1.05rem; cursor: pointer; transition: all 0.1s; }
-.btn-close:active { border-bottom-width: 0; transform: translateY(4px); }
-.editor { flex: 1; display: flex; flex-direction: column; background: #ffffff; }
-.editor-header { padding: 24px 32px; border-bottom: 2px solid #f0f0f0; }
-.editor-header h3 { margin: 0; color: #333; font-size: 1.3rem; }
-.type-switcher { display: flex; gap: 10px; margin-top: 16px; }
-.type-switcher button { flex: 1; padding: 10px; background: #f0f0f0; border: 2px solid transparent; border-radius: 12px; font-weight: bold; color: #777; cursor: pointer; transition: all 0.2s; }
-.type-switcher button.active { background: #e6f7ff; border-color: #1cb0f6; color: #1cb0f6; }
-.editor-body { flex: 1; overflow-y: auto; padding: 32px; }
-.form-group { margin-bottom: 24px; display: flex; flex-direction: column; }
-.form-group label { font-weight: bold; margin-bottom: 10px; color: #555; font-size: 0.95rem; }
-.form-group input[type="text"] { padding: 16px; border: 2px solid #e5e5e5; border-radius: 12px; font-size: 1.05rem; outline: none; transition: border 0.2s; background: #fafafa; width: 100%; box-sizing: border-box; }
-.form-group input[type="text"]:focus { border-color: #1cb0f6; background: #ffffff; box-shadow: 0 0 0 4px rgba(28, 176, 246, 0.1); }
-.upload-area { border: 2px dashed #ccc; border-radius: 16px; height: 180px; display: flex; justify-content: center; align-items: center; cursor: pointer; overflow: hidden; background: #fafafa; transition: all 0.2s; }
-.upload-area:hover { border-color: #1cb0f6; background: #e6f7ff; }
-.upload-placeholder { display: flex; flex-direction: column; align-items: center; gap: 12px; color: #999; font-weight: bold; }
-.upload-placeholder .icon { font-size: 2rem; }
-.preview-img { width: 100%; height: 100%; object-fit: contain; }
-.editor-footer { padding: 24px 32px; border-top: 2px solid #f0f0f0; display: flex; justify-content: flex-end; gap: 16px; background: #fafafa; }
-.btn-cancel { background: #ffffff; border: 2px solid #e5e5e5; padding: 12px 24px; border-radius: 12px; font-weight: bold; cursor: pointer; color: #777; }
-.btn-cancel:hover { background: #f0f0f0; }
-.btn-save { background: #58cc02; border: none; border-bottom: 4px solid #46a302; padding: 12px 32px; border-radius: 12px; font-weight: bold; color: white; cursor: pointer; font-size: 1rem; transition: all 0.1s; }
-.btn-save:active { border-bottom-width: 0; transform: translateY(4px); }
-.ghost { opacity: 0.5; background: #c8ebfb; border: 2px dashed #1cb0f6; }
+
+.admin-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+  backdrop-filter: blur(4px);
+}
+
+.admin-layout {
+  display: flex;
+  width: 90vw;
+  max-width: 1000px;
+  height: 85vh;
+  background: #ffffff;
+  border-radius: 24px;
+  overflow: hidden;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.2);
+  animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes popIn {
+  0% {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.sidebar {
+  width: 320px;
+  background: #f7f9fc;
+  border-right: 2px solid #e5e5e5;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-header {
+  padding: 24px;
+  border-bottom: 2px solid #e5e5e5;
+}
+
+.sidebar-header h2 {
+  margin: 0 0 8px 0;
+  font-size: 1.2rem;
+  color: #1cb0f6;
+}
+
+.sidebar-header p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #777;
+  line-height: 1.5;
+}
+
+.question-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.question-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px;
+  background: #ffffff;
+  border: 2px solid #e5e5e5;
+  border-radius: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.question-item:hover {
+  border-color: #1cb0f6;
+  transform: translateY(-2px);
+}
+
+.question-item.active {
+  border-color: #1cb0f6;
+  background: #e6f7ff;
+  box-shadow: 0 4px 12px rgba(28, 176, 246, 0.1);
+}
+
+.q-index {
+  font-size: 0.75rem;
+  color: #1cb0f6;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+}
+
+.q-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: 20px;
+}
+
+.q-noun {
+  font-weight: bold;
+  color: #333;
+  font-size: 1.05rem;
+}
+
+.q-desc {
+  font-size: 0.85rem;
+  color: #777;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.q-type-tag {
+  font-size: 0.65rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+  color: white;
+}
+
+.q-type-tag.standard {
+  background: #1cb0f6;
+}
+
+.q-type-tag.contrast {
+  background: #ff9800;
+}
+
+.btn-delete {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: #ffdfe0;
+  color: #ff4b4b;
+  border: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 0.8rem;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.question-item:hover .btn-delete {
+  opacity: 1;
+}
+
+.btn-new {
+  padding: 16px;
+  background: transparent;
+  border: 2px dashed #ccc;
+  border-radius: 16px;
+  color: #777;
+  font-weight: bold;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-new:hover {
+  border-color: #58cc02;
+  color: #58cc02;
+  background: #f0fff0;
+}
+
+.btn-new.active {
+  border-color: #58cc02;
+  color: #58cc02;
+  background: #f0fff0;
+}
+
+.sidebar-footer {
+  padding: 24px;
+  background: #ffffff;
+  border-top: 2px solid #e5e5e5;
+}
+
+.btn-close {
+  width: 100%;
+  padding: 16px;
+  background: #1cb0f6;
+  color: white;
+  border: none;
+  border-bottom: 4px solid #1899d6;
+  border-radius: 16px;
+  font-weight: bold;
+  font-size: 1.05rem;
+  cursor: pointer;
+  transition: all 0.1s;
+}
+
+.btn-close:active {
+  border-bottom-width: 0;
+  transform: translateY(4px);
+}
+
+.editor {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+}
+
+.editor-header {
+  padding: 24px 32px;
+  border-bottom: 2px solid #f0f0f0;
+}
+
+.editor-header h3 {
+  margin: 0;
+  color: #333;
+  font-size: 1.3rem;
+}
+
+.type-switcher {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.type-switcher button {
+  flex: 1;
+  padding: 10px;
+  background: #f0f0f0;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  font-weight: bold;
+  color: #777;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.type-switcher button.active {
+  background: #e6f7ff;
+  border-color: #1cb0f6;
+  color: #1cb0f6;
+}
+
+.editor-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 32px;
+}
+
+.form-group {
+  margin-bottom: 24px;
+  display: flex;
+  flex-direction: column;
+}
+
+.form-group label {
+  font-weight: bold;
+  margin-bottom: 10px;
+  color: #555;
+  font-size: 0.95rem;
+}
+
+.form-group input[type="text"] {
+  padding: 16px;
+  border: 2px solid #e5e5e5;
+  border-radius: 12px;
+  font-size: 1.05rem;
+  outline: none;
+  transition: border 0.2s;
+  background: #fafafa;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.form-group input[type="text"]:focus {
+  border-color: #1cb0f6;
+  background: #ffffff;
+  box-shadow: 0 0 0 4px rgba(28, 176, 246, 0.1);
+}
+
+.upload-area {
+  border: 2px dashed #ccc;
+  border-radius: 16px;
+  height: 180px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  overflow: hidden;
+  background: #fafafa;
+  transition: all 0.2s;
+}
+
+.upload-area:hover {
+  border-color: #1cb0f6;
+  background: #e6f7ff;
+}
+
+/* 👇 新增：當前選中上傳區的高亮樣式 */
+.upload-area.active-upload {
+  border-color: #58cc02;
+  background: #f0fff0;
+  box-shadow: 0 0 0 4px rgba(88, 204, 2, 0.2);
+}
+
+.upload-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: #999;
+  font-weight: bold;
+}
+
+.upload-placeholder .icon {
+  font-size: 2rem;
+}
+
+.preview-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.editor-footer {
+  padding: 24px 32px;
+  border-top: 2px solid #f0f0f0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 16px;
+  background: #fafafa;
+}
+
+.btn-cancel {
+  background: #ffffff;
+  border: 2px solid #e5e5e5;
+  padding: 12px 24px;
+  border-radius: 12px;
+  font-weight: bold;
+  cursor: pointer;
+  color: #777;
+}
+
+.btn-cancel:hover {
+  background: #f0f0f0;
+}
+
+.btn-save {
+  background: #58cc02;
+  border: none;
+  border-bottom: 4px solid #46a302;
+  padding: 12px 32px;
+  border-radius: 12px;
+  font-weight: bold;
+  color: white;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: all 0.1s;
+}
+
+.btn-save:active {
+  border-bottom-width: 0;
+  transform: translateY(4px);
+}
+
+.ghost {
+  opacity: 0.5;
+  background: #c8ebfb;
+  border: 2px dashed #1cb0f6;
+}
+
+.text-success {
+  color: #58cc02;
+  font-weight: bold;
+}
 </style>

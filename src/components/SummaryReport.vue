@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { ref, computed } from 'vue';
+import html2canvas from 'html2canvas';
 
 const props = defineProps<{
   completedLevels: number;
@@ -11,6 +12,9 @@ const emit = defineEmits<{
   (e: 'restart'): void;
 }>();
 
+const reportCardRef = ref<HTMLElement | null>(null);
+const isGenerating = ref(false);
+
 const misconceptionText = computed(() => {
   const dict: Record<string, string> = {
     'DUPLICATE_PRONOUN': '重複代名詞 (例如：who she)',
@@ -18,11 +22,38 @@ const misconceptionText = computed(() => {
   };
   return props.misconceptions.map(m => dict[m] || m);
 });
+
+const downloadScreenshot = async () => {
+  if (!reportCardRef.value) return;
+  isGenerating.value = true;
+  
+  try {
+    // 使用 html2canvas 將 DOM 轉換為圖片
+    const canvas = await html2canvas(reportCardRef.value, {
+      backgroundColor: '#ffffff', // 確保背景是白色的
+      scale: 2, // 提高解析度，讓圖片在手機上也很清晰
+      useCORS: true,
+    });
+    
+    // 將 Canvas 轉為圖片並觸發下載
+    const image = canvas.toDataURL('image/png');
+    const link = document.createElement('a');
+    link.href = image;
+    link.download = `AnimeHunter_學習紀錄_${new Date().getTime()}.png`;
+    link.click();
+  } catch (err) {
+    console.error('截圖失敗:', err);
+    alert('產生圖片失敗，請直接使用設備的截圖功能。');
+  } finally {
+    isGenerating.value = false;
+  }
+};
 </script>
 
 <template>
   <div class="summary-overlay">
-    <div class="summary-card">
+    <!-- 這個 div 包住的就是要截圖的範圍 -->
+    <div class="summary-card" ref="reportCardRef">
       <!-- 適合截圖的頂部標題 -->
       <div class="header">
         <div class="badge">🕵️ 英語文法小偵探</div>
@@ -40,18 +71,23 @@ const misconceptionText = computed(() => {
         </ul>
         <p v-else class="perfect-text">✨ 太完美了！沒有觸發任何文法迷思。</p>
       </div>
-
-      <!-- 截圖提示區 -->
-      <div class="screenshot-hint">
-        <p>📸 請使用平板或電腦的「截圖功能」，將此畫面拍下並傳給老師！</p>
+      
+      <!-- 卡片底部的水印 -->
+      <div class="watermark">
+        Anime Character Hunter Lite
       </div>
+    </div>
 
-      <!-- 動作按鈕 -->
-      <div class="actions">
-        <button class="btn-restart" @click="emit('restart')">
-          🔄 重新開始練習
-        </button>
-      </div>
+    <!-- 按鈕區 (放在卡片外面，這樣截圖時不會被拍到) -->
+    <div class="actions">
+      <button class="btn-download" @click="downloadScreenshot" :disabled="isGenerating">
+        <span v-if="isGenerating">⏳ 正在生成圖片...</span>
+        <span v-else>📸 下載學習紀錄 (傳給老師)</span>
+      </button>
+      
+      <button class="btn-restart" @click="emit('restart')" :disabled="isGenerating">
+        🔄 重新開始練習
+      </button>
     </div>
   </div>
 </template>
@@ -62,22 +98,26 @@ const misconceptionText = computed(() => {
   top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(0, 0, 0, 0.7);
   display: flex;
+  flex-direction: column;
   justify-content: center;
   align-items: center;
   z-index: 10000;
   backdrop-filter: blur(4px);
+  padding: 20px;
 }
 
+/* 報告卡片本身 */
 .summary-card {
   background: white;
-  width: 90vw;
+  width: 100%;
   max-width: 480px;
   border-radius: 24px;
   padding: 40px 32px;
   text-align: center;
   box-shadow: 0 24px 48px rgba(0,0,0,0.3);
-  animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  border: 4px solid #58cc02; /* 綠色外框，截圖更好看 */
+  border: 4px solid #58cc02;
+  position: relative;
+  overflow: hidden;
 }
 
 .header .badge {
@@ -99,7 +139,7 @@ const misconceptionText = computed(() => {
   border-radius: 16px;
   padding: 24px;
   text-align: left;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 .stats-section h3 { margin: 0 0 16px 0; color: #333; font-size: 1.2rem; text-align: center;}
 
@@ -122,29 +162,36 @@ const misconceptionText = computed(() => {
 .icon { margin-right: 8px; }
 .perfect-text { color: #58cc02; font-weight: bold; margin: 0; text-align: center; font-size: 1.1rem;}
 
-.screenshot-hint {
-  background: #fff8e1;
-  border: 2px dashed #ffc107;
-  border-radius: 12px;
-  padding: 16px;
-  margin-bottom: 24px;
-  color: #e65100;
+.watermark {
+  font-size: 0.75rem;
+  color: #ccc;
+  margin-top: 10px;
   font-weight: bold;
-  font-size: 0.95rem;
-  line-height: 1.5;
+  letter-spacing: 1px;
 }
 
-.actions { display: flex; flex-direction: column; gap: 12px; }
+/* 按鈕區 */
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 480px;
+  margin-top: 20px;
+}
 
-.btn-restart {
-  background: #f0f0f0; color: #777; border: none; border-bottom: 4px solid #ccc;
+.btn-download {
+  background: #1cb0f6; color: white; border: none; border-bottom: 5px solid #1899d6;
   padding: 16px; border-radius: 16px; font-weight: bold; font-size: 1.1rem; cursor: pointer;
   transition: all 0.1s;
 }
-.btn-restart:active { border-bottom-width: 0; transform: translateY(4px); }
+.btn-download:active { border-bottom-width: 0; transform: translateY(5px); }
+.btn-download:disabled { opacity: 0.7; cursor: not-allowed; }
 
-@keyframes popIn {
-  0% { transform: scale(0.9); opacity: 0; }
-  100% { transform: scale(1); opacity: 1; }
+.btn-restart {
+  background: rgba(255, 255, 255, 0.2); color: white; border: 2px solid white;
+  padding: 16px; border-radius: 16px; font-weight: bold; font-size: 1.1rem; cursor: pointer;
+  transition: all 0.1s;
 }
+.btn-restart:hover { background: rgba(255, 255, 255, 0.3); }
 </style>
