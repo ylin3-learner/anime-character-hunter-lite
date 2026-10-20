@@ -2,9 +2,9 @@
 
 **[English](README.md) | [繁體中文](README.zh-TW.md)**
 
-An interactive, cognitive-pipeline-driven English grammar learning tool designed for K-12 education. 
+An interactive, cognitive-pipeline-driven English grammar learning tool designed for K-12 education.
 
-Built with **Vue 3, TypeScript, and Vite**, this application takes a pedagogical approach to teaching **Post-modifiers (Relative Clauses & Prepositional Phrases)**, specifically targeting the common L1 interference (Chinese pre-modifiers vs. English post-modifiers) and structural misconceptions (e.g., redundant pronouns like `who she`).
+Built with **Vue 3, TypeScript, Vite, and Supabase**, this application takes a pedagogical approach to teaching **Post-modifiers (Relative Clauses & Prepositional Phrases)**, specifically targeting the common L1 interference (Chinese pre-modifiers vs. English post-modifiers) and structural misconceptions (e.g., redundant pronouns like `who she`).
 
 ## 🧠 The Cognitive Pipeline (Pedagogy-Driven Design)
 
@@ -26,14 +26,16 @@ Traditional grammar apps focus on rote memorization. This app is built upon Seco
 
 ### For Teachers (Teacher Admin)
 - **Zero-Code Question Builder**: Paste an image (auto-compressed) and type a sentence. The system automatically splits tiles, generates input processing data, and creates noticing board materials.
+- **Cloud Sync & Offline Fallback**: Question banks are synced via Supabase (PostgreSQL) for seamless multi-device deployment, with `localStorage` acting as an offline fallback.
+- **Class-wide Analytics Dashboard**: A built-in dashboard aggregates student error events (e.g., grammar misconceptions, wrong order, puzzle errors) into real-time bar charts, allowing teachers to instantly diagnose class-wide weaknesses.
 - **Auto-Distractor Generation**: If no distractors are provided, the system automatically injects common misconception tiles (e.g., *she*, *wear*) based on the target sentence.
 - **Custom Explanation Cards**: Teachers can define the title and description of the explanation card that pops up after a correct puzzle merge.
 - **Drag-and-Drop Sorting**: Easily reorder levels and difficulty progression via `vue-draggable-plus`.
-- **Local-First**: All custom questions are saved securely in the browser's `localStorage` (no backend needed).
 
 ## 🛠️ Tech Stack & Engineering
 
 - **Framework**: Vue 3 (Composition API) + Vite + TypeScript
+- **Database**: Supabase (PostgreSQL) for cloud synchronization and event logging
 - **Testing**: Vitest (Test-Driven Development for core grammar rule engines)
 - **Speech**: Web Speech API (Native browser TTS & STT)
 - **Drag & Drop**: Native Pointer Events & `vue-draggable-plus`
@@ -42,9 +44,16 @@ Traditional grammar apps focus on rote memorization. This app is built upon Seco
 
 ## 🚀 Getting Started
 
+### Environment Setup
+Create a `.env.local` file in the root directory and add your Supabase credentials:
+```env
+VITE_SUPABASE_URL=your_supabase_project_url
+VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+```
+
 ### Development
 
-```bash
+``` bash
 npm install
 npm run dev
 ```
@@ -54,7 +63,6 @@ npm run dev
 ``` bash
 npm test
 ```
-
 
 ### Deployment (GitHub Pages)
 
@@ -72,4 +80,4 @@ npm run deploy
 
 - Focus on Form: Long (1991)
 
-Developed with a focus on Cognitive Load Theory and Technical Debt Reduction in EdTech.
+Developed with a focus on Cognitive Load Theory, Data-Driven Instruction, and Technical Debt Reduction in EdTech.
