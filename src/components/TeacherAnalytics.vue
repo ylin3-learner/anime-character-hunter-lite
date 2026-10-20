@@ -58,6 +58,8 @@ const stats = computed(() => {
     const nameDict: Record<string, string> = {
         'DUPLICATE_PRONOUN': '重複代名詞 (例：who she)',
         'SV_AGREEMENT': '主謂不一致 (例：who wear)',
+        'WRONG_RELATIVE': '關代選擇錯誤', // 新增
+        'NOT_REDUCED': '未簡化轉換',      // 新增
         'WRONG_ORDER': '字序錯誤',
         'PUZZLE_ERROR': '拼圖方向/位置錯誤',
         'SUCCESS': '成功過關'

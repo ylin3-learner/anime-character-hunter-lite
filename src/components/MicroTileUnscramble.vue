@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { ref, watch, computed } from 'vue';
 import { validatePostModifier } from '../rules/grammarRules';
 import type { Antecedent, DiagnosticSignal } from '../rules/types';
-import { useSound } from '../utils/useSound'; // 引入音效
+import { useSound } from '../utils/useSound';
 
 const { playError } = useSound();
 
@@ -10,11 +10,13 @@ const props = defineProps<{
   initialTiles: string[];
   antecedent: Antecedent;
   correctAnswer: string[];
+  mode?: 'build' | 'reduce';
+  contextCloze?: { prefix: string; suffix: string }; // 👈 新增
 }>();
 
 const emit = defineEmits<{
   (e: 'success'): void;
-  (e: 'misconception', code: string): void; // 👈 新增事件
+  (e: 'misconception', code: string): void;
 }>();
 
 const wordBank = ref<{ id: number; text: string }[]>(
@@ -31,6 +33,8 @@ const selectTile = (tile: { id: number; text: string }) => {
   if (index !== -1) {
     wordBank.value.splice(index, 1);
     answerArea.value.push(tile);
+    isWrong.value = false;
+    signals.value = [];
   }
 };
 
@@ -41,56 +45,59 @@ const unselectTile = (tile: { id: number; text: string }) => {
     answerArea.value.splice(index, 1);
     wordBank.value.push(tile);
     isWrong.value = false;
+    signals.value = [];
+  }
+};
+
+const checkAnswer = () => {
+  const tileTexts = answerArea.value.map(t => t.text);
+  signals.value = validatePostModifier(tileTexts, props.antecedent, { mode: props.mode });
+
+  if (signals.value.length > 0) {
+    playError();
+    signals.value.forEach(s => emit('misconception', s.code));
+    return;
+  }
+
+  const isOrderCorrect = tileTexts.join(' ') === props.correctAnswer.join(' ');
+
+  if (isOrderCorrect) {
+    isSuccess.value = true;
+    setTimeout(() => emit('success'), 1000);
+  } else {
+    playError();
+    emit('misconception', 'WRONG_ORDER');
+    isWrong.value = true;
+    setTimeout(() => { isWrong.value = false; }, 500);
   }
 };
 
 watch(
   answerArea,
   (newVal) => {
-    // 👇 核心修正：當作答區的數量等於「正確答案的長度」時，才進行驗證
+    if (props.mode === 'reduce') return;
     if (newVal.length === props.correctAnswer.length) {
-      const tileTexts = newVal.map(t => t.text);
-      
-      // 1. 跑迷思檢查
-      signals.value = validatePostModifier(tileTexts, props.antecedent);
-      
-      if (signals.value.length > 0) {
-        playError(); 
-        signals.value.forEach(s => {
-          emit('misconception', s.code);
-        });
-      }
-      
-      // 2. 檢查字序是否完全正確
-      const isOrderCorrect = tileTexts.join(' ') === props.correctAnswer.join(' ');
-
-      if (signals.value.length === 0 && isOrderCorrect) {
-        // 全對！通關
-        isSuccess.value = true;
-        setTimeout(() => emit('success'), 1000);
-      } else if (signals.value.length === 0 && !isOrderCorrect) {
-        // 錯排，但沒有踩到迷思雷，觸發抖動反饋
-        playError();
-        emit('misconception', 'WRONG_ORDER'); // 發送通用錯誤代碼
-        isWrong.value = true;
-        setTimeout(() => {
-          isWrong.value = false;
-        }, 500); 
-      }
-    } else {
-      signals.value = [];
-      isWrong.value = false;
+      checkAnswer();
     }
   },
   { deep: true }
 );
 
 const isError = (index: number) => signals.value.some(s => s.index === index);
+const canCheck = computed(() => answerArea.value.length > 0);
 </script>
 
 <template>
-  <!-- Template 與 Style 保持不變，請沿用你原本的程式碼 -->
   <div class="micro-tile-game">
+    <!-- 👇 新增：克漏字上下文顯示 -->
+    <div class="cloze-context" v-if="props.contextCloze">
+      <span class="cloze-text">{{ props.contextCloze.prefix }}</span>
+      <span class="cloze-blank">
+        {{answerArea.length > 0 ? answerArea.map(t => t.text).join(' ') : '________'}}
+      </span>
+      <span class="cloze-text">{{ props.contextCloze.suffix }}</span>
+    </div>
+
     <div data-test="answer-area" class="answer-area" :class="{ 'success-bg': isSuccess, 'shake': isWrong }">
       <div v-for="(tile, index) in answerArea" :key="tile.id" data-test="tile" class="tile"
         :class="{ 'tile-error': isError(index), 'tile-success': isSuccess, 'tile-wrong': isWrong }"
@@ -103,6 +110,7 @@ const isError = (index: number) => signals.value.some(s => s.index === index);
       <div class="alert-icon">⚠️</div>
       <div class="alert-messages">
         <p v-for="s in signals" :key="s.code">{{ s.message }}</p>
+        <p v-if="signals[0].hint" class="hint-text">💡 {{ signals[0].hint }}</p>
       </div>
     </div>
 
@@ -115,11 +123,17 @@ const isError = (index: number) => signals.value.some(s => s.index === index);
         {{ tile.text }}
       </div>
     </div>
+
+    <div v-if="props.mode === 'reduce'" class="check-action">
+      <button class="btn-check" :disabled="!canCheck || isSuccess" @click="checkAnswer">
+        檢查答案
+      </button>
+    </div>
   </div>
 </template>
 
 <style scoped>
-/* 請保留你原本的樣式 */
+/* 原有樣式保持不變 */
 .micro-tile-game {
   display: flex;
   flex-direction: column;
@@ -214,6 +228,15 @@ const isError = (index: number) => signals.value.some(s => s.index === index);
   margin: 0 0 4px 0;
 }
 
+.hint-text {
+  color: #666;
+  font-size: 0.9rem;
+  font-weight: normal;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(255, 75, 75, 0.3);
+}
+
 .gentle-alert {
   text-align: center;
   color: #ff9800;
@@ -223,6 +246,60 @@ const isError = (index: number) => signals.value.some(s => s.index === index);
 
 .shake {
   animation: shake 0.4s cubic-bezier(.36, .07, .19, .97) both;
+}
+
+.check-action {
+  display: flex;
+  justify-content: center;
+  margin-top: 10px;
+}
+
+.btn-check {
+  background-color: #1cb0f6;
+  color: white;
+  border: none;
+  border-bottom: 4px solid #1899d6;
+  padding: 12px 48px;
+  font-size: 1.1rem;
+  font-weight: bold;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.1s;
+}
+
+.btn-check:active:not(:disabled) {
+  border-bottom-width: 0;
+  transform: translateY(4px);
+}
+
+.btn-check:disabled {
+  background-color: #e5e5e5;
+  color: #999;
+  border-bottom-color: #ccc;
+  cursor: not-allowed;
+}
+
+/* 👇 新增：克漏字樣式 */
+.cloze-context {
+  text-align: center;
+  font-size: 1.4rem;
+  font-weight: bold;
+  color: #333;
+  margin-bottom: 10px;
+  line-height: 1.6;
+}
+
+.cloze-text {
+  color: #555;
+}
+
+.cloze-blank {
+  color: #1cb0f6;
+  background: #e6f7ff;
+  padding: 4px 12px;
+  border-radius: 8px;
+  border-bottom: 2px dashed #1cb0f6;
+  margin: 0 8px;
 }
 
 @keyframes shake {

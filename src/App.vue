@@ -3,7 +3,7 @@ import { ref, computed, onMounted } from 'vue';
 import MacroDragCanvas from './components/MacroDragCanvas.vue';
 import MicroTileUnscramble from './components/MicroTileUnscramble.vue';
 import TeacherAdmin from './components/TeacherAdmin.vue';
-import TeacherAnalytics from './components/TeacherAnalytics.vue'; // 👈 新增引入
+import TeacherAnalytics from './components/TeacherAnalytics.vue';
 import ContrastPuzzle from './components/ContrastPuzzle.vue';
 import StructuredInput from './components/StructuredInput.vue';
 import PronunciationAnalyzer from './components/PronunciationAnalyzer.vue';
@@ -13,9 +13,8 @@ import { defaultQuestions, type QuestionData } from './data/questions';
 import { useSound } from './utils/useSound';
 import { CloudDatabase } from './services/CloudDatabase';
 
-// 狀態管理
 const showAdmin = ref(false);
-const showAnalytics = ref(false); // 👈 新增：數據面板狀態
+const showAnalytics = ref(false);
 const currentIndex = ref(0);
 const questionBank = ref<QuestionData[]>([]);
 const currentStage = ref<'input' | 'macro' | 'micro' | 'success' | 'noticing'>('macro');
@@ -23,12 +22,10 @@ const currentMode = ref<'relative' | 'preposition'>('relative');
 
 const { playSuccess } = useSound();
 
-// 👇 教師權限驗證狀態
 const showAdminAuth = ref(false);
 const adminPasswordInput = ref('');
 const isAdminAuthenticated = ref(sessionStorage.getItem('admin_auth') === 'true');
 
-// 學習紀錄狀態
 const sessionLog = ref<string[]>([]);
 const showSummary = ref(false);
 const completedCount = ref(0);
@@ -88,14 +85,12 @@ const fullSentenceData = computed(() => {
   };
 });
 
-// 👇 修改：接收迷思時，寫入 Supabase
 const handleMisconception = (code: string) => {
   if (!sessionLog.value.includes(code)) {
     sessionLog.value.push(code);
   }
-  // 寫入雲端資料庫
   CloudDatabase.logEvent({
-    student_name: '匿名學生', // MVP 階段先寫死
+    student_name: '匿名學生',
     question_id: currentQuestion.value.id,
     error_code: code
   });
@@ -116,12 +111,10 @@ const handleUnpack = (type: 'relative' | 'preposition') => {
   currentStage.value = 'micro';
 };
 
-// 👇 修改：過關時，寫入 Supabase
 const handleSuccess = () => {
   playSuccess();
   currentStage.value = 'success';
 
-  // 寫入雲端資料庫
   CloudDatabase.logEvent({
     student_name: '匿名學生',
     question_id: currentQuestion.value.id,
@@ -180,7 +173,6 @@ const updateQuestionBank = async (updatedQuestions: QuestionData[]) => {
   }
 };
 
-// 👇 教師權限驗證邏輯
 const openAdmin = () => {
   if (isAdminAuthenticated.value) {
     showAdmin.value = true;
@@ -213,7 +205,6 @@ const verifyAdmin = () => {
         </div>
         <button class="btn-finish" @click="showSummary = true">🏁 結束練習</button>
         <button class="btn-admin" @click="openAdmin">👩‍🏫 教師備課中心</button>
-        <!-- 👇 新增：數據分析按鈕 -->
         <button class="btn-analytics" @click="showAnalytics = true">📊 數據分析</button>
       </div>
     </header>
@@ -247,8 +238,7 @@ const verifyAdmin = () => {
           :correctAnswer="currentQuestion.grammarFeature.relative.correctAnswer"
           :antecedent="currentQuestion.antecedent" :layout="currentQuestion.contrastData.layout"
           :explanationTitle="currentQuestion.explanation?.title" :explanationDesc="currentQuestion.explanation?.desc"
-          @success="handleSuccess" 
-          @misconception="handleMisconception" />
+          @success="handleSuccess" @misconception="handleMisconception" />
       </div>
 
       <template v-else>
@@ -267,9 +257,11 @@ const verifyAdmin = () => {
         <div v-else-if="currentStage === 'micro'" class="stage-content">
           <h2 class="instruction">圖塊已解鎖！請排列出正確的字序。</h2>
           <div class="target-noun"><span class="highlight">{{ currentQuestion.targetNoun }}</span></div>
-          <MicroTileUnscramble :initialTiles="currentQuestion.grammarFeature[currentMode].tiles"
+          <MicroTileUnscramble
+            :initialTiles="currentQuestion.mode === 'reduce' ? currentQuestion.grammarFeature.relative.tiles : currentQuestion.grammarFeature[currentMode].tiles"
             :antecedent="currentQuestion.antecedent"
-            :correctAnswer="currentQuestion.grammarFeature[currentMode].correctAnswer" @success="handleSuccess"
+            :correctAnswer="currentQuestion.mode === 'reduce' ? currentQuestion.grammarFeature.preposition.correctAnswer : currentQuestion.grammarFeature[currentMode].correctAnswer"
+            :mode="currentQuestion.mode" :contextCloze="currentQuestion.contextCloze" @success="handleSuccess"
             @misconception="handleMisconception" />
         </div>
       </template>
@@ -278,10 +270,8 @@ const verifyAdmin = () => {
     <SummaryReport v-if="showSummary" :completedLevels="completedCount" :totalLevels="questionBank.length"
       :misconceptions="sessionLog" @restart="restartGame" />
 
-    <!-- 👇 新增：教師數據分析彈窗 -->
     <TeacherAnalytics v-if="showAnalytics" @close="showAnalytics = false" />
 
-    <!-- 教師密碼驗證彈窗 -->
     <div v-if="showAdminAuth" class="auth-overlay">
       <div class="auth-card">
         <h3>👩‍🏫 教師驗證</h3>
@@ -300,7 +290,6 @@ const verifyAdmin = () => {
 </template>
 
 <style scoped>
-/* 保持原有樣式不變，新增 btn-analytics 樣式 */
 .app-container {
   max-width: 800px;
   margin: 0 auto;
@@ -375,7 +364,6 @@ header h1 {
   transform: translateY(4px);
 }
 
-/* 👇 新增數據按鈕樣式 */
 .btn-analytics {
   background: #9c27b0;
   color: white;
@@ -500,7 +488,6 @@ header h1 {
   }
 }
 
-/* 教師驗證彈窗樣式 */
 .auth-overlay {
   position: fixed;
   top: 0;

@@ -7,6 +7,8 @@ const props = defineProps<{
   currentQuestions: QuestionData[];
 }>();
 
+const questionMode = ref<'build' | 'reduce'>('build');
+
 const emit = defineEmits<{
   (e: 'update', questions: QuestionData[]): void;
   (e: 'close'): void;
@@ -34,11 +36,14 @@ const distractorsInput = ref('');
 const explanationTitle = ref('✨ 你發現了嗎？');
 const explanationDesc = ref('在英文中，修飾語要放在名詞的後面喔！');
 
+// 👇 新增：克漏字狀態
+const clozePrefix = ref('');
+const clozeSuffix = ref('');
+
 const fileInput = ref<HTMLInputElement | null>(null);
 const modifierFileInput = ref<HTMLInputElement | null>(null);
 const uploadTarget = ref<'noun' | 'modifier'>('noun');
 
-// 👇 核心修正：記錄當前使用者想要上傳圖片的目標
 const activeUploadTarget = ref<'noun' | 'modifier' | null>(null);
 
 const isEditing = computed(() => editingId.value !== null);
@@ -46,6 +51,7 @@ const isEditing = computed(() => editingId.value !== null);
 const resetForm = () => {
   editingId.value = null;
   questionType.value = 'standard';
+  questionMode.value = 'build';
   enabledStages.value = ['input', 'macro', 'micro', 'pronunciation', 'noticing'];
   imageUrl.value = '';
   targetNoun.value = '';
@@ -58,12 +64,15 @@ const resetForm = () => {
   distractorsInput.value = '';
   explanationTitle.value = '✨ 你發現了嗎？';
   explanationDesc.value = '在英文中，修飾語要放在名詞的後面喔！';
-  activeUploadTarget.value = null; // 重置意圖
+  clozePrefix.value = '';
+  clozeSuffix.value = '';
+  activeUploadTarget.value = null;
 };
 
 const editQuestion = (q: QuestionData) => {
   editingId.value = q.id;
   questionType.value = q.type;
+  questionMode.value = q.mode || 'build';
   enabledStages.value = q.enabledStages || ['input', 'macro', 'micro', 'pronunciation', 'noticing'];
   imageUrl.value = q.imageUrl;
   targetNoun.value = q.targetNoun;
@@ -73,6 +82,11 @@ const editQuestion = (q: QuestionData) => {
   distractorsInput.value = q.grammarFeature.relative.distractors?.join(', ') || '';
   explanationTitle.value = q.explanation?.title || '✨ 你發現了嗎？';
   explanationDesc.value = q.explanation?.desc || '在英文中，修飾語要放在名詞的後面喔！';
+
+  if (q.contextCloze) {
+    clozePrefix.value = q.contextCloze.prefix;
+    clozeSuffix.value = q.contextCloze.suffix;
+  }
 
   if (q.contrastData) {
     chineseSentence.value = q.contrastData.chineseSentence;
@@ -90,7 +104,6 @@ const deleteQuestion = (id: string) => {
   }
 };
 
-// 👇 點擊上傳區時，記錄當前的意圖
 const triggerUpload = (target: 'noun' | 'modifier') => {
   activeUploadTarget.value = target;
   uploadTarget.value = target;
@@ -102,11 +115,9 @@ const handleFileChange = (event: Event) => {
   const target = event.target as HTMLInputElement;
   const file = target.files?.[0];
   if (file) processImage(file, uploadTarget.value);
-  // 選擇檔案後清空意圖，避免後續誤貼
   activeUploadTarget.value = null;
 };
 
-// 👇 重寫 handlePaste：具備工業級防呆與路由
 const handlePaste = (event: ClipboardEvent) => {
   const items = event.clipboardData?.items;
   if (!items) return;
@@ -116,17 +127,14 @@ const handlePaste = (event: ClipboardEvent) => {
     if (item.type.indexOf('image') !== -1) hasImage = true;
   }
 
-  // 如果剪貼簿沒有圖片，直接放行（讓瀏覽器原生貼上文字）
   if (!hasImage) return;
 
-  // 如果有圖片，但使用者沒有點擊任何圖片上傳區，就給予提示
   if (!activeUploadTarget.value) {
     alert('請先點擊「角色圖片」或「修飾語圖片」的框框，再按貼上喔！');
     event.preventDefault();
     return;
   }
 
-  // 處理圖片貼上
   for (const item of items) {
     if (item.type.indexOf('image') !== -1) {
       const file = item.getAsFile();
@@ -175,7 +183,6 @@ const processImage = (file: File, target: 'noun' | 'modifier') => {
       } else {
         modifierImageUrl.value = compressedBase64;
       }
-      // 貼上完成後清空意圖
       activeUploadTarget.value = null;
     };
     img.src = e.target?.result as string;
@@ -194,17 +201,12 @@ const saveQuestion = () => {
   }
 
   const relCorrect = generateTiles(relativeSentence.value);
-
   let distractors = distractorsInput.value.split(/[,，\s]+/).filter(Boolean);
 
   if (distractors.length === 0) {
     const correctWords = relCorrect.map(w => w.toLowerCase());
-    if (correctWords.includes('who') || correctWords.includes('which')) {
-      distractors.push('she', 'it');
-    }
-    if (correctWords.includes('wears') || correctWords.includes('has')) {
-      distractors.push('wear', 'have');
-    }
+    if (correctWords.includes('who') || correctWords.includes('which')) distractors.push('she', 'it');
+    if (correctWords.includes('wears') || correctWords.includes('has')) distractors.push('wear', 'have');
     distractors = [...new Set(distractors)].filter(d => !correctWords.includes(d.toLowerCase()));
   }
 
@@ -218,6 +220,7 @@ const saveQuestion = () => {
   const newQuestion: QuestionData = {
     id: editingId.value || `q_${Date.now()}`,
     type: questionType.value,
+    mode: questionMode.value,
     targetNoun: targetNoun.value,
     antecedent: {
       noun: targetNoun.value,
@@ -254,6 +257,14 @@ const saveQuestion = () => {
       explanation: `沒錯！當先行詞是「人」的時候，我們使用 who 來引導關係子句。`
     }
   };
+
+  // 👇 儲存克漏字
+  if (questionMode.value === 'reduce' && (clozePrefix.value || clozeSuffix.value)) {
+    newQuestion.contextCloze = {
+      prefix: clozePrefix.value,
+      suffix: clozeSuffix.value
+    };
+  }
 
   if (questionType.value === 'contrast') {
     newQuestion.contrastData = {
@@ -336,18 +347,28 @@ const saveAllAndClose = () => {
                 <label><input type="checkbox" value="pronunciation" v-model="enabledStages"> 語音練習</label>
                 <label><input type="checkbox" value="noticing" v-model="enabledStages"> 意識提升</label>
               </div>
+              <label>題目模式</label>
+              <div class="type-switcher">
+                <button :class="{ active: questionMode === 'build' }" @click="questionMode = 'build'">
+                  一般組句題 (Build)
+                </button>
+                <button :class="{ active: questionMode === 'reduce' }" @click="questionMode = 'reduce'">
+                  關係子句轉換題 (Reduce)
+                </button>
+              </div>
+              <p v-if="questionMode === 'reduce'" style="font-size: 0.8rem; color: #ff9800; margin-top: 8px;">
+                提示：轉換題請將正確答案設定為簡化後的句子（如：under the chair），並將 that, is 設為干擾磚。
+              </p>
             </div>
 
             <div class="form-group">
               <label>{{ questionType === 'contrast' ? '名詞圖片 (拼圖右側)' : '角色圖片' }}</label>
-              <!-- 👇 加上動態 class 提示當前選中的上傳區 -->
               <div class="upload-area" :class="{ 'active-upload': activeUploadTarget === 'noun' }"
                 @click="triggerUpload('noun')">
                 <img v-if="imageUrl" :src="imageUrl" class="preview-img" />
                 <div v-else class="upload-placeholder">
                   <span class="icon">📸</span>
                   <span>點擊後「貼上截圖」或選擇圖片</span>
-                  <!-- 👇 動態提示文字 -->
                   <span v-if="activeUploadTarget === 'noun'" class="text-success">✅ 已就緒！請按 Ctrl+V 貼上</span>
                   <span v-else>點擊此處選擇圖片，或按 Ctrl+V 貼上</span>
                 </div>
@@ -357,15 +378,13 @@ const saveAllAndClose = () => {
 
             <div class="form-group" v-if="questionType === 'contrast'">
               <label>修飾語圖片 (拼圖左側)</label>
-              <!-- 👇 加上動態 class 提示當前選中的上傳區 -->
               <div class="upload-area" :class="{ 'active-upload': activeUploadTarget === 'modifier' }"
                 @click="triggerUpload('modifier')">
                 <img v-if="modifierImageUrl" :src="modifierImageUrl" class="preview-img" />
                 <div v-else class="upload-placeholder">
                   <span class="icon">🧩</span>
                   <span>點擊後「貼上截圖」或選擇圖片</span>
-                  <!-- 👇 動態提示文字 -->
-                  <span v-if="activeUploadTarget === 'noun'" class="text-success">✅ 已就緒！請按 Ctrl+V 貼上</span>
+                  <span v-if="activeUploadTarget === 'modifier'" class="text-success">✅ 已就緒！請按 Ctrl+V 貼上</span>
                   <span v-else>點擊此處選擇圖片，或按 Ctrl+V 貼上</span>
                 </div>
               </div>
@@ -373,7 +392,6 @@ const saveAllAndClose = () => {
                 @change="handleFileChange" />
             </div>
 
-            <!-- 👇 點擊輸入框時，清除上傳意圖 -->
             <div class="form-row">
               <div class="form-group">
                 <label>目標名詞</label>
@@ -391,6 +409,18 @@ const saveAllAndClose = () => {
               <label>迷思干擾磚 (選填，若空白系統會自動生成，例: she, which)</label>
               <input v-model="distractorsInput" type="text" placeholder="Ex: she, which, wear"
                 @focus="activeUploadTarget = null" />
+            </div>
+
+            <!-- 👇 新增：克漏字上下文輸入框 -->
+            <div class="form-group" v-if="questionType === 'standard' && questionMode === 'reduce'">
+              <label>克漏字上下文 (選填，但強烈建議填寫)</label>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <input v-model="clozePrefix" type="text" placeholder="Ex: The ball" style="flex: 1;"
+                  @focus="activeUploadTarget = null" />
+                <span style="font-weight: bold; color: #777;">[ 簡化後的片語 ]</span>
+                <input v-model="clozeSuffix" type="text" placeholder="Ex: is dirty." style="flex: 1;"
+                  @focus="activeUploadTarget = null" />
+              </div>
             </div>
 
             <template v-if="questionType === 'contrast'">
@@ -445,7 +475,7 @@ const saveAllAndClose = () => {
 </template>
 
 <style scoped>
-/* 原有樣式保持不變，新增 active-upload 的提示樣式 */
+/* 原有樣式保持不變 */
 .stage-checkboxes {
   display: flex;
   flex-wrap: wrap;
@@ -786,7 +816,6 @@ const saveAllAndClose = () => {
   background: #e6f7ff;
 }
 
-/* 👇 新增：當前選中上傳區的高亮樣式 */
 .upload-area.active-upload {
   border-color: #58cc02;
   background: #f0fff0;

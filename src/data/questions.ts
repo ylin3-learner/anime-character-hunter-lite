@@ -1,6 +1,7 @@
 export interface QuestionData {
   id: string;
   type: 'standard' | 'contrast';
+  mode?: 'build' | 'reduce'; 
   targetNoun: string;
   antecedent: {
     noun: string;
@@ -10,6 +11,12 @@ export interface QuestionData {
   imageUrl: string;
   enabledStages?: ('input' | 'macro' | 'micro' | 'pronunciation' | 'noticing')[];
   
+  // 👇 新增：克漏字上下文
+  contextCloze?: {
+    prefix: string;
+    suffix: string;
+  };
+
   grammarFeature: {
     relative: { 
       label: string; 
@@ -52,6 +59,7 @@ export const defaultQuestions: QuestionData[] = [
   {
     id: 'q1',
     type: 'standard',
+    mode: 'build',
     targetNoun: 'The girl',
     antecedent: { noun: 'The girl', number: 'singular', person: 'person' },
     imageUrl: 'https://api.dicebear.com/7.x/adventurer/svg?seed=AnimeGirl',

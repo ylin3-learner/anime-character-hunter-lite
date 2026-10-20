@@ -1,11 +1,14 @@
 export type DiagnosticCode =
-  | 'DUPLICATE_PRONOUN'
-  | 'SV_AGREEMENT';
+  | 'DUPLICATE_PRONOUN'   // who she wears：關代後重複代名詞
+  | 'SV_AGREEMENT'        // the boys who lives：動詞與先行詞不一致
+  | 'WRONG_RELATIVE'      // 人用 which／物用 who（that 兩者皆可）
+  | 'NOT_REDUCED'         // 轉換題仍保留 who／which／that
+  | 'INCOMPLETE_REDUCTION'; // 新增：轉換題刪了關代卻留下 be 動詞
 
 export interface DiagnosticSignal {
   code: DiagnosticCode;
-  index: number;          // 出錯的 tile 索引
-  message: string;        // 顯示給學生的中文提示
+  index: number;
+  message: string;
   hint?: string;
 }
 
