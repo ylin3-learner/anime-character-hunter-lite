@@ -15,6 +15,7 @@ import { CloudDatabase } from './services/CloudDatabase';
 
 const showAdmin = ref(false);
 const showAnalytics = ref(false);
+const pendingAction = ref<'admin' | 'analytics' | null>(null); // 👈 新增：記錄解鎖後要開啟的視窗
 const currentIndex = ref(0);
 const questionBank = ref<QuestionData[]>([]);
 const currentStage = ref<'input' | 'macro' | 'micro' | 'success' | 'noticing'>('macro');
@@ -173,25 +174,51 @@ const updateQuestionBank = async (updatedQuestions: QuestionData[]) => {
   }
 };
 
+// 👇 修改：統一權限驗證邏輯
 const openAdmin = () => {
   if (isAdminAuthenticated.value) {
     showAdmin.value = true;
   } else {
+    pendingAction.value = 'admin';
     showAdminAuth.value = true;
   }
 };
 
+// 👇 新增：數據分析權限驗證
+const openAnalytics = () => {
+  if (isAdminAuthenticated.value) {
+    showAnalytics.value = true;
+  } else {
+    pendingAction.value = 'analytics';
+    showAdminAuth.value = true;
+  }
+};
+
+// 👇 修改：驗證成功後，根據 pendingAction 決定開啟哪個視窗
 const verifyAdmin = () => {
   if (adminPasswordInput.value === 'admin123') {
     isAdminAuthenticated.value = true;
     sessionStorage.setItem('admin_auth', 'true');
-    showAdmin.value = true;
     showAdminAuth.value = false;
     adminPasswordInput.value = '';
+
+    if (pendingAction.value === 'admin') {
+      showAdmin.value = true;
+    } else if (pendingAction.value === 'analytics') {
+      showAnalytics.value = true;
+    }
+    pendingAction.value = null;
   } else {
     alert('密碼錯誤！請聯繫授課教師。');
     adminPasswordInput.value = '';
   }
+};
+
+// 👇 新增：取消驗證時重置狀態
+const cancelAuth = () => {
+  showAdminAuth.value = false;
+  adminPasswordInput.value = '';
+  pendingAction.value = null;
 };
 </script>
 
@@ -205,7 +232,8 @@ const verifyAdmin = () => {
         </div>
         <button class="btn-finish" @click="showSummary = true">🏁 結束練習</button>
         <button class="btn-admin" @click="openAdmin">👩‍🏫 教師備課中心</button>
-        <button class="btn-analytics" @click="showAnalytics = true">📊 數據分析</button>
+        <!-- 👇 修改：改用 openAnalytics 觸發密碼驗證 -->
+        <button class="btn-analytics" @click="openAnalytics">📊 數據分析</button>
       </div>
     </header>
 
@@ -270,15 +298,18 @@ const verifyAdmin = () => {
     <SummaryReport v-if="showSummary" :completedLevels="completedCount" :totalLevels="questionBank.length"
       :misconceptions="sessionLog" @restart="restartGame" />
 
+    <!-- 👇 加入 v-if 判斷，確保 showAnalytics 為 true 時才顯示 -->
     <TeacherAnalytics v-if="showAnalytics" @close="showAnalytics = false" />
 
+    <!-- 👇 密碼驗證彈窗 -->
     <div v-if="showAdminAuth" class="auth-overlay">
       <div class="auth-card">
         <h3>👩‍🏫 教師驗證</h3>
-        <p>請輸入密碼以進入備課中心</p>
+        <p>請輸入密碼以進入系統</p>
         <input type="password" v-model="adminPasswordInput" placeholder="" @keyup.enter="verifyAdmin" />
         <div class="auth-actions">
-          <button class="btn-cancel" @click="showAdminAuth = false">取消</button>
+          <!-- 👇 改用 cancelAuth 重置狀態 -->
+          <button class="btn-cancel" @click="cancelAuth">取消</button>
           <button class="btn-confirm" @click="verifyAdmin">確認</button>
         </div>
       </div>
@@ -290,6 +321,7 @@ const verifyAdmin = () => {
 </template>
 
 <style scoped>
+/* 樣式保持不變 */
 .app-container {
   max-width: 800px;
   margin: 0 auto;
