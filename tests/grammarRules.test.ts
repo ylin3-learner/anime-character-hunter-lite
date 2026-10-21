@@ -84,3 +84,28 @@ describe('reduce 模式（轉換題）', () => {
     expect(validatePostModifier(t('The ball that is under the chair is dirty'), ball)).toEqual([]);
   });
 });
+
+describe('reduce 模式：正解不可被誤報（回歸測試）', () => {
+  it.each([
+    'The ball under the chair is dirty',
+    'The man with big eyes is Ken',
+    'My mom is the woman in a long skirt',
+    'I know the cosplayer in a cat costume',
+    'Do you know the writer with a dictionary',
+    'The car with two doors is expensive',
+  ])('%s → 無訊號', s => {
+    expect(codes(validatePostModifier(t(s), ball, { mode: 'reduce' }))).toEqual([]);
+  });
+});
+
+describe('reduce 模式：殘留 be 動詞', () => {
+  it('只拿掉 that、留下 is → INCOMPLETE_REDUCTION，指向第一個 is', () => {
+    const r = validatePostModifier(t('The ball is under the chair is dirty'), ball, { mode: 'reduce' });
+    expect(codes(r)).toEqual(['INCOMPLETE_REDUCTION']);
+    expect(r[0].index).toBe(2);
+  });
+  it('仍有關代時優先回報 NOT_REDUCED，不夾帶 INCOMPLETE_REDUCTION', () => {
+    expect(codes(validatePostModifier(t('The ball that is under the chair is dirty'), ball, { mode: 'reduce' })))
+      .toEqual(['NOT_REDUCED']);
+  });
+});

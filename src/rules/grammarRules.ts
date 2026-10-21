@@ -87,23 +87,36 @@ export function assertReduced(tiles: string[]): DiagnosticSignal[] {
   ];
 }
 
-// 👇 新增：抓出未刪除的 be 動詞
+// 抓出「關代拿掉了、be 動詞卻還留在修飾語前面」。
+// 只在 be 動詞「緊接介系詞」時才判定為殘留：
+//   The ball is under the chair is dirty  → 第一個 is 後面接 under → 殘留
+//   The ball under the chair is dirty     → is 後面接 dirty → 正解，不誤報
+//   My mom is the woman in a long skirt   → is 後面接 the → 正解，不誤報
+const PREPOSITIONS = new Set([
+  'in', 'on', 'at', 'under', 'behind', 'with', 'by', 'next', 'across',
+  'near', 'from', 'over', 'above', 'beside', 'between', 'inside', 'outside',
+]);
+
 export function assertNoLeftoverBe(tiles: string[]): DiagnosticSignal[] {
   const hasRelative = tiles.some(t => RELATIVE_PRONOUNS.has(t.toLowerCase()));
-  const beIndex = tiles.findIndex(t => BE_VERBS.has(t.toLowerCase()));
-  
-  // 如果已經沒有關代了，但卻留下了 be 動詞
-  if (!hasRelative && beIndex !== -1) {
-    return [
-      {
-        code: 'INCOMPLETE_REDUCTION',
-        index: beIndex,
-        message: `「${tiles[beIndex]}」是多餘的喔！`,
-        hint: `關代和 be 動詞要一起省略。請把「${tiles[beIndex]}」拿掉。`,
-      },
-    ];
-  }
-  return [];
+  if (hasRelative) return [];
+
+  const beIndex = tiles.findIndex(
+    (t, i) =>
+      BE_VERBS.has(t.toLowerCase()) &&
+      i + 1 < tiles.length &&
+      PREPOSITIONS.has(tiles[i + 1].toLowerCase())
+  );
+  if (beIndex === -1) return [];
+
+  return [
+    {
+      code: 'INCOMPLETE_REDUCTION',
+      index: beIndex,
+      message: `「${tiles[beIndex]}」是多餘的喔！`,
+      hint: `關代和 be 動詞要一起省略。請把「${tiles[beIndex]}」拿掉。`,
+    },
+  ];
 }
 
 export interface ValidateOptions {
