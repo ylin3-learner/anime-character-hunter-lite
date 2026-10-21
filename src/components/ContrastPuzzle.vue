@@ -26,36 +26,37 @@ const emit = defineEmits<{
   (e: 'misconception', code: string): void;
 }>();
 
-// 👇 座標系設定
+// 👇 全新的水平座標系
+const BOARD_WIDTH = 640;
 const SLOT_WIDTH = 140;
-const SLOT_A_X = 160;
-const SLOT_B_X = 300;
-const LIBRARY_LEFT_X = 50;
-const LIBRARY_RIGHT_X = 410;
+const SLOT_A_X = 180;
+const SLOT_B_X = 320;
+const LIBRARY_LEFT_X = 20;
+const LIBRARY_RIGHT_X = 480;
 
 const isMerged = ref(false);
-const isWrong = ref(false); // 👈 新增：錯誤狀態
+const isWrong = ref(false);
 const showExplanation = ref(false);
 const showEnglish = ref(false);
 const draggingType = ref<'noun' | 'modifier' | null>(null);
 
+// 所有元素初始都在 Y = 0
 const modifierX = ref(LIBRARY_LEFT_X);
-const modifierY = ref(200);
+const modifierY = ref(0);
 const nounX = ref(LIBRARY_RIGHT_X);
-const nounY = ref(200);
+const nounY = ref(0);
 
 const modifierSlot = ref<'A' | 'B' | null>(null);
 const nounSlot = ref<'A' | 'B' | null>(null);
-
 const hoverSlot = ref<'A' | 'B' | null>(null);
 
 const isModifierLeft = computed(() => (props.layout || 'modifier-left') === 'modifier-left');
 
 const resetPositions = () => {
   modifierX.value = LIBRARY_LEFT_X;
-  modifierY.value = 200;
   nounX.value = LIBRARY_RIGHT_X;
-  nounY.value = 200;
+  modifierY.value = 0;
+  nounY.value = 0;
   modifierSlot.value = null;
   nounSlot.value = null;
   hoverSlot.value = null;
@@ -71,7 +72,6 @@ let startLeft = 0;
 let startTop = 0;
 
 const startDrag = (e: PointerEvent, type: 'modifier' | 'noun') => {
-  // 👇 抖動動畫期間禁止拖拽
   if (isMerged.value || isWrong.value) return;
   draggingType.value = type;
   e.preventDefault();
@@ -101,15 +101,11 @@ const onDrag = (e: PointerEvent) => {
     nounY.value = currentY;
   }
 
-  const targetY = 0;
-  if (Math.abs(currentY - targetY) < 100) {
-    if (Math.abs(currentX - SLOT_A_X) < 80) {
-      hoverSlot.value = 'A';
-    } else if (Math.abs(currentX - SLOT_B_X) < 80) {
-      hoverSlot.value = 'B';
-    } else {
-      hoverSlot.value = null;
-    }
+  // 因為都在同一水平線，只要判斷 X 靠近哪個槽位
+  if (Math.abs(currentX - SLOT_A_X) < 80) {
+    hoverSlot.value = 'A';
+  } else if (Math.abs(currentX - SLOT_B_X) < 80) {
+    hoverSlot.value = 'B';
   } else {
     hoverSlot.value = null;
   }
@@ -121,7 +117,6 @@ const stopDrag = () => {
   window.removeEventListener('pointerup', stopDrag);
 
   const type = draggingType.value;
-  const targetY = 0;
   let isPlaced = false;
 
   if (hoverSlot.value !== null) {
@@ -131,11 +126,11 @@ const stopDrag = () => {
     if (!isOccupied) {
       if (type === 'modifier') {
         modifierX.value = slot === 'A' ? SLOT_A_X : SLOT_B_X;
-        modifierY.value = targetY;
+        modifierY.value = 0;
         modifierSlot.value = slot;
       } else {
         nounX.value = slot === 'A' ? SLOT_A_X : SLOT_B_X;
-        nounY.value = targetY;
+        nounY.value = 0;
         nounSlot.value = slot;
       }
       isPlaced = true;
@@ -145,11 +140,11 @@ const stopDrag = () => {
   if (!isPlaced) {
     if (type === 'modifier') {
       modifierX.value = LIBRARY_LEFT_X;
-      modifierY.value = 200;
+      modifierY.value = 0;
       modifierSlot.value = null;
     } else {
       nounX.value = LIBRARY_RIGHT_X;
-      nounY.value = 200;
+      nounY.value = 0;
       nounSlot.value = null;
     }
   }
@@ -180,10 +175,8 @@ const checkAnswer = () => {
     playError();
     emit('misconception', 'PUZZLE_ERROR');
 
-    // 👇 觸發錯誤狀態 (紅框 + 抖動)
     isWrong.value = true;
 
-    // 抖動 800 毫秒後，彈回原位並清除錯誤狀態
     setTimeout(() => {
       isWrong.value = false;
       resetPositions();
@@ -207,32 +200,33 @@ const continueToNext = () => {
       </div>
 
       <div class="puzzle-wrapper">
-        <!-- 👇 加上 isWrong 綁定，讓整個畫布抖動 -->
         <div class="puzzle-board" :class="{ 'shake': isWrong }">
+          <!-- 中線 (只在兩個 slot 之間) -->
           <div class="center-line"></div>
 
-          <!-- 👇 上方：兩個空白槽位 (錯誤時紅框) -->
+          <!-- 左槽位 -->
           <div class="slot" :class="{
             'hover': hoverSlot === 'A',
             'filled': modifierSlot === 'A' || nounSlot === 'A',
-            'wrong': isWrong // 錯誤時紅框
+            'wrong': isWrong
           }" :style="{ left: `${SLOT_A_X}px` }">
             <span v-if="!modifierSlot && !nounSlot && !hoverSlot && !isWrong" class="slot-text">空格 A</span>
           </div>
 
+          <!-- 右槽位 -->
           <div class="slot" :class="{
             'hover': hoverSlot === 'B',
             'filled': modifierSlot === 'B' || nounSlot === 'B',
-            'wrong': isWrong // 錯誤時紅框
+            'wrong': isWrong
           }" :style="{ left: `${SLOT_B_X}px` }">
             <span v-if="!modifierSlot && !nounSlot && !hoverSlot && !isWrong" class="slot-text">空格 B</span>
           </div>
 
-          <!-- 👇 下方：圖庫 (錯誤時紅框) -->
+          <!-- 左側圖庫 (修飾語) -->
           <div class="puzzle-piece" :class="{
             'dragging': draggingType === 'modifier',
             'in-slot': modifierSlot !== null,
-            'wrong-piece': isWrong // 錯誤時紅框
+            'wrong-piece': isWrong
           }" :style="{
               left: `${modifierX}px`,
               top: `${modifierY}px`,
@@ -242,10 +236,11 @@ const continueToNext = () => {
             <img :src="modifierImage" alt="modifier" draggable="false" />
           </div>
 
+          <!-- 右側圖庫 (名詞) -->
           <div class="puzzle-piece" :class="{
             'dragging': draggingType === 'noun',
             'in-slot': nounSlot !== null,
-            'wrong-piece': isWrong // 錯誤時紅框
+            'wrong-piece': isWrong
           }" :style="{
               left: `${nounX}px`,
               top: `${nounY}px`,
@@ -258,7 +253,7 @@ const continueToNext = () => {
       </div>
 
       <p class="hint" :class="{ 'fade-out': isMerged || isWrong }">
-        <span v-if="!isMerged && !isWrong">請將下方的兩張圖，分別拖曳到上方的空格中。</span>
+        <span v-if="!isMerged && !isWrong">請將兩側的圖片，分別拖曳到中間的空格中。</span>
         <span v-if="isWrong" class="error-text">排列順序不對喔，再想想看！</span>
       </p>
 
@@ -292,8 +287,7 @@ const continueToNext = () => {
 </template>
 
 <style scoped>
-/* 原有樣式保持不變，新增錯誤狀態與抖動動畫 */
-
+/* 樣式保持不變，只需調整畫布高度 */
 .contrast-puzzle {
   display: flex;
   flex-direction: column;
@@ -338,28 +332,29 @@ const continueToNext = () => {
   margin-bottom: 20px;
 }
 
+/* 👇 高度縮減為 160px，讓版面非常緊湊 */
 .puzzle-board {
   position: relative;
-  width: 600px;
-  height: 400px;
+  width: 640px;
+  height: 160px;
   flex-shrink: 0;
 }
 
+/* 👇 中線位置與高度 */
 .center-line {
   position: absolute;
-  left: 300px;
+  left: 320px;
   top: 0;
-  bottom: 180px;
+  bottom: 0;
   width: 2px;
   background: #e5e5e5;
   transform: translateX(-50%);
   z-index: 0;
 }
 
-/* 槽位樣式 */
 .slot {
   position: absolute;
-  top: 0;
+  top: 10px;
   width: 140px;
   height: 140px;
   border: 4px dashed #ccc;
@@ -383,7 +378,6 @@ const continueToNext = () => {
   background: transparent;
 }
 
-/* 👇 錯誤時的空格紅框 */
 .slot.wrong {
   border-color: #ff4b4b !important;
   background: #ffe6e6;
@@ -395,9 +389,9 @@ const continueToNext = () => {
   font-size: 1.2rem;
 }
 
-/* 拼圖塊樣式 */
 .puzzle-piece {
   position: absolute;
+  top: 10px;
   width: 140px;
   height: 140px;
   overflow: hidden;
@@ -418,7 +412,6 @@ const continueToNext = () => {
   box-shadow: 0 0 0 4px rgba(88, 204, 2, 0.2);
 }
 
-/* 👇 錯誤時的圖片紅框 */
 .puzzle-piece.wrong-piece {
   border-color: #ff4b4b !important;
   box-shadow: 0 0 0 4px rgba(255, 75, 75, 0.2);
@@ -431,7 +424,6 @@ const continueToNext = () => {
   pointer-events: none;
 }
 
-/* 👇 抖動動畫 */
 .shake {
   animation: shake 0.4s cubic-bezier(.36, .07, .19, .97) both;
 }
