@@ -33,8 +33,8 @@ const puzzleLayout = ref<'modifier-left' | 'modifier-right'>('modifier-left');
 
 // 干擾磚與解釋卡狀態
 const distractorsInput = ref('');
-const explanationTitle = ref('✨ 你發現了嗎？');
-const explanationDesc = ref('在英文中，修飾語要放在名詞的後面喔！');
+const explanationTitle = ref('');
+const explanationDesc = ref('');
 
 // 👇 新增：克漏字狀態
 const clozePrefix = ref('');
@@ -62,8 +62,8 @@ const resetForm = () => {
   modifierImageUrl.value = '';
   puzzleLayout.value = 'modifier-left';
   distractorsInput.value = '';
-  explanationTitle.value = '✨ 你發現了嗎？';
-  explanationDesc.value = '在英文中，修飾語要放在名詞的後面喔！';
+  explanationTitle.value = '';
+  explanationDesc.value = '';
   clozePrefix.value = '';
   clozeSuffix.value = '';
   activeUploadTarget.value = null;
@@ -80,8 +80,8 @@ const editQuestion = (q: QuestionData) => {
   prepositionSentence.value = q.grammarFeature.preposition.label;
 
   distractorsInput.value = q.grammarFeature.relative.distractors?.join(', ') || '';
-  explanationTitle.value = q.explanation?.title || '✨ 你發現了嗎？';
-  explanationDesc.value = q.explanation?.desc || '在英文中，修飾語要放在名詞的後面喔！';
+  explanationTitle.value = q.explanation?.title || '';
+  explanationDesc.value = q.explanation?.desc || '';
 
   if (q.contextCloze) {
     clozePrefix.value = q.contextCloze.prefix;

@@ -228,11 +228,11 @@ const continueToNext = () => {
             'in-slot': modifierSlot !== null,
             'wrong-piece': isWrong
           }" :style="{
-              left: `${modifierX}px`,
-              top: `${modifierY}px`,
-              transition: draggingType === 'modifier' ? 'none' : 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-              zIndex: draggingType === 'modifier' ? 10 : 2
-            }" @pointerdown="startDrag($event, 'modifier')">
+            left: `${modifierX}px`,
+            top: `${modifierY}px`,
+            transition: draggingType === 'modifier' ? 'none' : 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+            zIndex: draggingType === 'modifier' ? 10 : 2
+          }" @pointerdown="startDrag($event, 'modifier')">
             <img :src="modifierImage" alt="modifier" draggable="false" />
           </div>
 
@@ -242,11 +242,11 @@ const continueToNext = () => {
             'in-slot': nounSlot !== null,
             'wrong-piece': isWrong
           }" :style="{
-              left: `${nounX}px`,
-              top: `${nounY}px`,
-              transition: draggingType === 'noun' ? 'none' : 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-              zIndex: draggingType === 'noun' ? 10 : 1
-            }" @pointerdown="startDrag($event, 'noun')">
+            left: `${nounX}px`,
+            top: `${nounY}px`,
+            transition: draggingType === 'noun' ? 'none' : 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+            zIndex: draggingType === 'noun' ? 10 : 1
+          }" @pointerdown="startDrag($event, 'noun')">
             <img :src="nounImage" alt="noun" draggable="false" />
           </div>
         </div>
@@ -259,8 +259,10 @@ const continueToNext = () => {
 
       <Transition name="pop-up">
         <div v-if="showExplanation" class="explanation-card">
-          <h3>{{ explanationTitle || '✨ 你發現了嗎？' }}</h3>
-          <p class="explanation-text">{{ explanationDesc || '在英文中，修飾語的位置是：' }}</p>
+          <!-- 👇 只有當老師有填寫時才顯示標題 -->
+          <h3 v-if="explanationTitle">{{ explanationTitle }}</h3>
+          <!-- 👇 只有當老師有填寫時才顯示說明 -->
+          <p v-if="explanationDesc" class="explanation-text">{{ explanationDesc }}</p>
 
           <div class="english-sentence">
             <span class="noun-text">{{ englishNoun }}</span>
