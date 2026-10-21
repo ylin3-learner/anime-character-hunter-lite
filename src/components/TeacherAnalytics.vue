@@ -1,26 +1,29 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { CloudDatabase, type LearningLog } from '../services/CloudDatabase';
+import type { QuestionData } from '../data/questions';
+
+const props = defineProps<{
+    questionBank: QuestionData[];
+}>();
 
 const emit = defineEmits<{ (e: 'close'): void }>();
 
 const logs = ref<LearningLog[]>([]);
 const isLoading = ref(true);
 const isClearing = ref(false);
+const expandedCode = ref<string | null>(null);
 
-// 抓取資料的函式
 const loadData = async () => {
     isLoading.value = true;
     logs.value = await CloudDatabase.fetchLogs();
     isLoading.value = false;
 };
 
-// 初始化載入
 onMounted(() => {
     loadData();
 });
 
-// 清空紀錄邏輯
 const handleClearLogs = async () => {
     const confirmed = confirm('確定要清空所有學生的作答紀錄嗎？此操作無法復原喔！');
     if (!confirmed) return;
@@ -30,45 +33,100 @@ const handleClearLogs = async () => {
 
     if (success) {
         alert('✅ 已成功清空所有紀錄！');
-        await loadData(); // 重新載入資料以更新畫面
+        await loadData();
     } else {
         alert('❌ 清空失敗，請確認網路連線。');
     }
     isClearing.value = false;
 };
 
-// 統計各種錯誤代碼的次數
-const stats = computed(() => {
-    const counts: Record<string, number> = {};
-    logs.value.forEach(log => {
-        if (log.error_code) {
-            counts[log.error_code] = (counts[log.error_code] || 0) + 1;
+const toggleNode = (code: string) => {
+    expandedCode.value = expandedCode.value === code ? null : code;
+};
+
+const adviceDictionary: Record<string, string> = {
+    'DUPLICATE_PRONOUN': '學生尚未理解關代已代替先行詞。請提醒：關代後面直接接動詞，不需要再加 she/he/it。',
+    'WRONG_RELATIVE': '學生混淆了先行詞的屬性。請提醒：先行詞是「人」用 who，是「物」用 which。',
+    'SV_AGREEMENT': '學生沒注意到關代動詞要與先行詞單複數一致。請提醒：動詞單複數看「先行詞」。',
+    'NOT_REDUCED': '學生在轉換題保留了關代。請提醒：關代（that/which）在轉換時要直接刪除。',
+    'INCOMPLETE_REDUCTION': '學生刪了關代，卻忘了刪 be 動詞。請提醒：關代與 be 動詞必須「一起」省略。',
+    'WRONG_ORDER': '學生排列正確，但語序有誤。請提醒他們檢查「名詞 + 關代 + 動詞」的順序。',
+    'PUZZLE_ERROR': '學生將修飾語放錯位置（可能受中文干擾）。請提醒：英文修飾語要放在名詞「後面」。'
+};
+
+const titleDictionary: Record<string, string> = {
+    'DUPLICATE_PRONOUN': '重複代名詞',
+    'WRONG_RELATIVE': '關代選擇錯誤',
+    'SV_AGREEMENT': '主謂不一致',
+    'NOT_REDUCED': '未簡化轉換',
+    'INCOMPLETE_REDUCTION': '未完全簡化',
+    'WRONG_ORDER': '字序錯誤',
+    'PUZZLE_ERROR': '拼圖方向錯誤'
+};
+
+interface SubNode {
+    questionId: string;
+    questionText: string;
+    count: number;
+}
+
+interface ErrorNode {
+    code: string;
+    name: string;
+    totalCount: number;
+    advice: string;
+    subNodes: SubNode[];
+}
+
+// 👇 核心邏輯：將資料分群成雙層結構，並加入克漏字上下文
+const errorTree = computed<ErrorNode[]>(() => {
+    const errorLogs = logs.value.filter(log => log.error_code !== 'SUCCESS');
+    const counts: Record<string, { total: number; questions: Record<string, number> }> = {};
+
+    errorLogs.forEach(log => {
+        if (!counts[log.error_code]) {
+            counts[log.error_code] = { total: 0, questions: {} };
         }
+        counts[log.error_code].total += 1;
+        counts[log.error_code].questions[log.question_id] =
+            (counts[log.error_code].questions[log.question_id] || 0) + 1;
     });
 
-    const total = Object.values(counts).reduce((a, b) => a + b, 0);
-    const sorted = Object.entries(counts)
-        .map(([code, count]) => ({
-            code,
-            count,
-            percentage: total === 0 ? 0 : (count / total) * 100
-        }))
-        .sort((a, b) => b.count - a.count);
+    return Object.entries(counts)
+        .map(([code, data]) => {
+            const subNodes: SubNode[] = Object.entries(data.questions).map(([qid, qCount]) => {
+                const targetQ = props.questionBank.find(q => q.id === qid);
+                let qText = '（題目已被刪除）';
 
-    const nameDict: Record<string, string> = {
-        'DUPLICATE_PRONOUN': '重複代名詞 (例：who she)',
-        'SV_AGREEMENT': '主謂不一致 (例：who wear)',
-        'WRONG_RELATIVE': '關代選擇錯誤', // 新增
-        'NOT_REDUCED': '未簡化轉換',      // 新增
-        'WRONG_ORDER': '字序錯誤',
-        'PUZZLE_ERROR': '拼圖方向/位置錯誤',
-        'SUCCESS': '成功過關'
-    };
+                if (targetQ) {
+                    const noun = targetQ.targetNoun;
+                    const modifier = targetQ.grammarFeature?.relative?.label || '';
 
-    return sorted.map(item => ({
-        ...item,
-        name: nameDict[item.code] || item.code
-    }));
+                    // 👇 如果有克漏字上下文，就把它們組合起來
+                    if (targetQ.contextCloze) {
+                        qText = `${targetQ.contextCloze.prefix} [ ${modifier} ] ${targetQ.contextCloze.suffix}`;
+                    } else {
+                        // 沒有上下文的舊題目，退回原本的顯示方式
+                        qText = `${noun} [ ${modifier} ]`;
+                    }
+                }
+
+                return {
+                    questionId: qid,
+                    questionText: qText,
+                    count: qCount
+                };
+            }).sort((a, b) => b.count - a.count);
+
+            return {
+                code,
+                name: titleDictionary[code] || code,
+                totalCount: data.total,
+                advice: adviceDictionary[code] || '請參考課本對應文法單元。',
+                subNodes
+            };
+        })
+        .sort((a, b) => b.totalCount - a.totalCount);
 });
 </script>
 
@@ -76,9 +134,8 @@ const stats = computed(() => {
     <div class="analytics-overlay">
         <div class="analytics-card">
             <div class="header">
-                <h2>📊 全班學習軌跡分析</h2>
+                <h2>📊 學習診斷與教學處方</h2>
                 <div class="header-actions">
-                    <!-- 👇 加上確認是否有成功定義樣式 -->
                     <button class="btn-clear" @click="handleClearLogs" :disabled="isClearing || logs.length === 0">
                         {{ isClearing ? '清空中...' : '🗑️ 清空紀錄' }}
                     </button>
@@ -93,15 +150,40 @@ const stats = computed(() => {
             </div>
 
             <div v-else class="stats-container">
-                <p class="subtitle">總計收集 {{ logs.length }} 筆學習紀錄</p>
+                <p class="subtitle">總計收集 {{ logs.length }} 筆學習紀錄（點擊展開錯誤題目）</p>
 
-                <div class="chart">
-                    <div v-for="item in stats" :key="item.code" class="chart-row">
-                        <div class="label">{{ item.name }} ({{ item.count }} 次)</div>
-                        <div class="bar-bg">
-                            <div class="bar-fill" :style="{ width: `${item.percentage}%` }"></div>
+                <div class="mindmap">
+                    <div class="mindmap-root">
+                        <div class="root-node">🧠 全班學習痛點</div>
+                        <div class="root-line"></div>
+                    </div>
+
+                    <div class="mindmap-branches">
+                        <!-- Layer 1: 錯誤類型 -->
+                        <div v-for="node in errorTree" :key="node.code" class="branch-wrapper">
+                            <div class="branch-node" :class="{ 'expanded': expandedCode === node.code }"
+                                @click="toggleNode(node.code)">
+                                <span class="node-name">{{ node.name }}</span>
+                                <span class="node-count">{{ node.totalCount }} 次</span>
+                            </div>
+
+                            <!-- Layer 2: 具體題目 -->
+                            <Transition name="slide">
+                                <div v-if="expandedCode === node.code" class="prescription-card">
+                                    <div class="prescription-header">💡 教學處方</div>
+                                    <p class="advice-text">{{ node.advice }}</p>
+
+                                    <!-- 顯示出錯的具體題目 -->
+                                    <div class="question-list">
+                                        <div class="question-list-title">出錯題目統計：</div>
+                                        <div v-for="sub in node.subNodes" :key="sub.questionId" class="question-item">
+                                            <span class="q-text">{{ sub.questionText }}</span>
+                                            <span class="q-count">錯 {{ sub.count }} 次</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </Transition>
                         </div>
-                        <div class="percentage">{{ Math.round(item.percentage) }}%</div>
                     </div>
                 </div>
             </div>
@@ -110,7 +192,7 @@ const stats = computed(() => {
 </template>
 
 <style scoped>
-/* 原有樣式保持不變，新增 header-actions 與 btn-clear 樣式 */
+/* 樣式保持不變，微調處方卡片內的題目列表 */
 .analytics-overlay {
     position: fixed;
     top: 0;
@@ -128,10 +210,13 @@ const stats = computed(() => {
 .analytics-card {
     background: white;
     width: 90vw;
-    max-width: 600px;
+    max-width: 650px;
+    max-height: 85vh;
     border-radius: 24px;
     padding: 32px;
     box-shadow: 0 24px 48px rgba(0, 0, 0, 0.3);
+    display: flex;
+    flex-direction: column;
     animation: popIn 0.3s ease;
 }
 
@@ -142,6 +227,7 @@ const stats = computed(() => {
     margin-bottom: 20px;
     border-bottom: 2px solid #eee;
     padding-bottom: 16px;
+    flex-shrink: 0;
 }
 
 .header h2 {
@@ -150,14 +236,12 @@ const stats = computed(() => {
     font-size: 1.5rem;
 }
 
-/* 👇 修正：補齊按鈕群組樣式 */
 .header-actions {
     display: flex;
     align-items: center;
     gap: 12px;
 }
 
-/* 👇 修正：補齊清空按鈕的樣式（紅色警告色） */
 .btn-clear {
     background: #ffdfe0;
     color: #ff4b4b;
@@ -201,55 +285,218 @@ const stats = computed(() => {
     color: #777;
     padding: 40px 0;
     font-size: 1.1rem;
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
 }
 
 .subtitle {
     color: #777;
     margin-bottom: 24px;
     font-weight: bold;
+    font-size: 0.95rem;
 }
 
-/* 圖表樣式 */
-.chart {
+.stats-container {
+    overflow-y: auto;
+    padding-right: 10px;
+}
+
+.mindmap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.mindmap-root {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.root-node {
+    background: #1cb0f6;
+    color: white;
+    padding: 12px 24px;
+    border-radius: 12px;
+    font-weight: bold;
+    font-size: 1.1rem;
+    box-shadow: 0 4px 12px rgba(28, 176, 246, 0.3);
+}
+
+.root-line {
+    width: 2px;
+    height: 30px;
+    background: #ccc;
+    margin-top: 10px;
+}
+
+.mindmap-branches {
     display: flex;
     flex-direction: column;
     gap: 16px;
+    width: 100%;
+    position: relative;
+    padding-left: 20px;
 }
 
-.chart-row {
+.mindmap-branches::before {
+    content: '';
+    position: absolute;
+    left: 20px;
+    top: -20px;
+    bottom: 50%;
+    width: 2px;
+    background: #ccc;
+}
+
+.branch-wrapper {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    padding-left: 40px;
+}
+
+.branch-wrapper::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 24px;
+    width: 40px;
+    height: 2px;
+    background: #ccc;
+}
+
+.branch-node {
+    background: #f7f9fc;
+    border: 2px solid #e5e5e5;
+    padding: 12px 20px;
+    border-radius: 12px;
     display: flex;
     align-items: center;
     gap: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    width: 100%;
+    max-width: 450px;
+    position: relative;
+    z-index: 1;
 }
 
-.label {
-    width: 200px;
-    font-size: 0.95rem;
+.branch-node:hover {
+    border-color: #1cb0f6;
+    background: #e6f7ff;
+}
+
+.branch-node.expanded {
+    border-color: #1cb0f6;
+    background: #e6f7ff;
+    box-shadow: 0 4px 12px rgba(28, 176, 246, 0.1);
+}
+
+.node-name {
     font-weight: bold;
     color: #333;
-    text-align: right;
-}
-
-.bar-bg {
     flex: 1;
-    height: 24px;
-    background: #f0f0f0;
-    border-radius: 12px;
-    overflow: hidden;
 }
 
-.bar-fill {
-    height: 100%;
-    background: linear-gradient(90deg, #1cb0f6, #58cc02);
-    border-radius: 12px;
-    transition: width 1s ease-out;
-}
-
-.percentage {
-    width: 50px;
+.node-count {
     font-weight: bold;
-    color: #1cb0f6;
-    text-align: left;
+    color: #ff4b4b;
+    font-size: 1.1rem;
+}
+
+/* 展開的處方卡片 */
+.prescription-card {
+    background: #f0fff0;
+    border: 2px solid #58cc02;
+    border-radius: 12px;
+    padding: 16px;
+    margin-top: 12px;
+    width: 100%;
+    max-width: 450px;
+    position: relative;
+}
+
+.prescription-card::before {
+    content: '';
+    position: absolute;
+    left: -20px;
+    top: 24px;
+    width: 18px;
+    height: 2px;
+    background: #58cc02;
+}
+
+.prescription-header {
+    font-weight: bold;
+    color: #58cc02;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.advice-text {
+    color: #333;
+    line-height: 1.5;
+    margin: 0 0 16px 0;
+    font-size: 0.95rem;
+}
+
+/* 👇 新增：題目列表樣式 */
+.question-list {
+    background: white;
+    border-radius: 8px;
+    padding: 12px;
+    border: 1px dashed #58cc02;
+}
+
+.question-list-title {
+    font-size: 0.85rem;
+    font-weight: bold;
+    color: #777;
+    margin-bottom: 8px;
+}
+
+.question-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid #eee;
+    font-size: 0.9rem;
+}
+
+.question-item:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.q-text {
+    color: #333;
+    font-family: monospace;
+}
+
+.q-count {
+    color: #ff4b4b;
+    font-weight: bold;
+    font-size: 0.85rem;
+}
+
+/* 動畫 */
+.slide-enter-active,
+.slide-leave-active {
+    transition: all 0.3s ease;
+}
+
+.slide-enter-from,
+.slide-leave-to {
+    opacity: 0;
+    transform: translateY(-10px);
 }
 
 @keyframes popIn {

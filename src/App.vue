@@ -15,7 +15,7 @@ import { CloudDatabase } from './services/CloudDatabase';
 
 const showAdmin = ref(false);
 const showAnalytics = ref(false);
-const pendingAction = ref<'admin' | 'analytics' | null>(null); // 👈 新增：記錄解鎖後要開啟的視窗
+const pendingAction = ref<'admin' | 'analytics' | null>(null);
 const currentIndex = ref(0);
 const questionBank = ref<QuestionData[]>([]);
 const currentStage = ref<'input' | 'macro' | 'micro' | 'success' | 'noticing'>('macro');
@@ -87,13 +87,20 @@ const fullSentenceData = computed(() => {
 });
 
 const handleMisconception = (code: string) => {
+  console.log('🚨 App.vue 接收到迷思事件:', code); // 👈 確保事件有傳到這裡
+
   if (!sessionLog.value.includes(code)) {
     sessionLog.value.push(code);
   }
+
   CloudDatabase.logEvent({
     student_name: '匿名學生',
     question_id: currentQuestion.value.id,
     error_code: code
+  }).then(() => {
+    console.log('✅ 軌跡已成功發送至 Supabase');
+  }).catch((err) => {
+    console.error('❌ 寫入 Supabase 失敗:', err);
   });
 };
 
@@ -116,11 +123,7 @@ const handleSuccess = () => {
   playSuccess();
   currentStage.value = 'success';
 
-  CloudDatabase.logEvent({
-    student_name: '匿名學生',
-    question_id: currentQuestion.value.id,
-    error_code: 'SUCCESS'
-  });
+  // 不記錄 SUCCESS
 
   if (completedCount.value <= currentIndex.value) {
     completedCount.value = currentIndex.value + 1;
@@ -174,7 +177,6 @@ const updateQuestionBank = async (updatedQuestions: QuestionData[]) => {
   }
 };
 
-// 👇 修改：統一權限驗證邏輯
 const openAdmin = () => {
   if (isAdminAuthenticated.value) {
     showAdmin.value = true;
@@ -184,7 +186,6 @@ const openAdmin = () => {
   }
 };
 
-// 👇 新增：數據分析權限驗證
 const openAnalytics = () => {
   if (isAdminAuthenticated.value) {
     showAnalytics.value = true;
@@ -194,7 +195,6 @@ const openAnalytics = () => {
   }
 };
 
-// 👇 修改：驗證成功後，根據 pendingAction 決定開啟哪個視窗
 const verifyAdmin = () => {
   if (adminPasswordInput.value === 'admin123') {
     isAdminAuthenticated.value = true;
@@ -214,7 +214,6 @@ const verifyAdmin = () => {
   }
 };
 
-// 👇 新增：取消驗證時重置狀態
 const cancelAuth = () => {
   showAdminAuth.value = false;
   adminPasswordInput.value = '';
@@ -232,7 +231,6 @@ const cancelAuth = () => {
         </div>
         <button class="btn-finish" @click="showSummary = true">🏁 結束練習</button>
         <button class="btn-admin" @click="openAdmin">👩‍🏫 教師備課中心</button>
-        <!-- 👇 修改：改用 openAnalytics 觸發密碼驗證 -->
         <button class="btn-analytics" @click="openAnalytics">📊 數據分析</button>
       </div>
     </header>
@@ -298,17 +296,14 @@ const cancelAuth = () => {
     <SummaryReport v-if="showSummary" :completedLevels="completedCount" :totalLevels="questionBank.length"
       :misconceptions="sessionLog" @restart="restartGame" />
 
-    <!-- 👇 加入 v-if 判斷，確保 showAnalytics 為 true 時才顯示 -->
-    <TeacherAnalytics v-if="showAnalytics" @close="showAnalytics = false" />
+    <TeacherAnalytics v-if="showAnalytics" :questionBank="questionBank" @close="showAnalytics = false" />
 
-    <!-- 👇 密碼驗證彈窗 -->
     <div v-if="showAdminAuth" class="auth-overlay">
       <div class="auth-card">
         <h3>👩‍🏫 教師驗證</h3>
         <p>請輸入密碼以進入系統</p>
         <input type="password" v-model="adminPasswordInput" placeholder="" @keyup.enter="verifyAdmin" />
         <div class="auth-actions">
-          <!-- 👇 改用 cancelAuth 重置狀態 -->
           <button class="btn-cancel" @click="cancelAuth">取消</button>
           <button class="btn-confirm" @click="verifyAdmin">確認</button>
         </div>

@@ -11,7 +11,7 @@ const props = defineProps<{
   antecedent: Antecedent;
   correctAnswer: string[];
   mode?: 'build' | 'reduce';
-  contextCloze?: { prefix: string; suffix: string }; // 👈 新增
+  contextCloze?: { prefix: string; suffix: string };
 }>();
 
 const emit = defineEmits<{
@@ -51,14 +51,21 @@ const unselectTile = (tile: { id: number; text: string }) => {
 
 const checkAnswer = () => {
   const tileTexts = answerArea.value.map(t => t.text);
+
+  // 1. 執行語法檢查
   signals.value = validatePostModifier(tileTexts, props.antecedent, { mode: props.mode });
 
+  // 2. 如果有任何語法迷思，立刻發送事件並中斷
   if (signals.value.length > 0) {
     playError();
-    signals.value.forEach(s => emit('misconception', s.code));
+    signals.value.forEach(s => {
+      console.log('🔥 MicroTile 發送迷思事件:', s.code); // 👈 加這裡確認有無觸發
+      emit('misconception', s.code);
+    });
     return;
   }
 
+  // 3. 檢查字序是否正確
   const isOrderCorrect = tileTexts.join(' ') === props.correctAnswer.join(' ');
 
   if (isOrderCorrect) {
@@ -76,7 +83,8 @@ watch(
   answerArea,
   (newVal) => {
     if (props.mode === 'reduce') return;
-    if (newVal.length === props.correctAnswer.length) {
+    // 只要字數大於等於正確答案，就進行檢查
+    if (newVal.length >= props.correctAnswer.length) {
       checkAnswer();
     }
   },
@@ -89,7 +97,6 @@ const canCheck = computed(() => answerArea.value.length > 0);
 
 <template>
   <div class="micro-tile-game">
-    <!-- 👇 新增：克漏字上下文顯示 -->
     <div class="cloze-context" v-if="props.contextCloze">
       <span class="cloze-text">{{ props.contextCloze.prefix }}</span>
       <span class="cloze-blank">
@@ -133,7 +140,7 @@ const canCheck = computed(() => answerArea.value.length > 0);
 </template>
 
 <style scoped>
-/* 原有樣式保持不變 */
+/* 樣式保持不變 */
 .micro-tile-game {
   display: flex;
   flex-direction: column;
@@ -279,7 +286,6 @@ const canCheck = computed(() => answerArea.value.length > 0);
   cursor: not-allowed;
 }
 
-/* 👇 新增：克漏字樣式 */
 .cloze-context {
   text-align: center;
   font-size: 1.4rem;
