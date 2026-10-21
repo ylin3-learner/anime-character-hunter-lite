@@ -25,9 +25,11 @@ Traditional grammar apps focus on rote memorization. This app is built upon Seco
 - **Text-Diff Pronunciation Panel**: Record your voice, compare it with the target sentence, and see exactly which words were missed.
 
 ### For Teachers (Teacher Admin)
+
 - **Zero-Code Question Builder**: Paste an image (auto-compressed) and type a sentence. The system automatically splits tiles, generates input processing data, and creates noticing board materials.
 - **Cloud Sync & Offline Fallback**: Question banks are synced via Supabase (PostgreSQL) for seamless multi-device deployment, with `localStorage` acting as an offline fallback.
 - **Class-wide Analytics Dashboard**: A built-in dashboard aggregates student error events (e.g., grammar misconceptions, wrong order, puzzle errors) into real-time bar charts, allowing teachers to instantly diagnose class-wide weaknesses.
+- **Password Protection**: Both the Teacher Admin and Analytics Dashboard are locked behind a password to prevent students from accidentally deleting questions or clearing assessment data.
 - **Auto-Distractor Generation**: If no distractors are provided, the system automatically injects common misconception tiles (e.g., *she*, *wear*) based on the target sentence.
 - **Custom Explanation Cards**: Teachers can define the title and description of the explanation card that pops up after a correct puzzle merge.
 - **Drag-and-Drop Sorting**: Easily reorder levels and difficulty progression via `vue-draggable-plus`.
