@@ -17,7 +17,6 @@ const props = defineProps<{
   correctAnswer: string[];
   antecedent: Antecedent;
   layout?: 'modifier-left' | 'modifier-right';
-  // 👇 新增：接收自訂解釋卡內容
   explanationTitle?: string;
   explanationDesc?: string;
 }>();
@@ -27,101 +26,169 @@ const emit = defineEmits<{
   (e: 'misconception', code: string): void;
 }>();
 
-// 座標系設定
-const BOARD_WIDTH = 600;
-const PIECE_SIZE = 140;
-const CENTER_X = 300;
-
-const LEFT_TARGET = CENTER_X - PIECE_SIZE;
-const RIGHT_TARGET = CENTER_X;
-const FAR_LEFT = 0;
-const FAR_RIGHT = BOARD_WIDTH - PIECE_SIZE;
+// 👇 座標系設定
+const SLOT_WIDTH = 140;
+const SLOT_A_X = 160;
+const SLOT_B_X = 300;
+const LIBRARY_LEFT_X = 50;
+const LIBRARY_RIGHT_X = 410;
 
 const isMerged = ref(false);
+const isWrong = ref(false); // 👈 新增：錯誤狀態
 const showExplanation = ref(false);
 const showEnglish = ref(false);
 const draggingType = ref<'noun' | 'modifier' | null>(null);
-const isNearTarget = ref(false);
+
+const modifierX = ref(LIBRARY_LEFT_X);
+const modifierY = ref(200);
+const nounX = ref(LIBRARY_RIGHT_X);
+const nounY = ref(200);
+
+const modifierSlot = ref<'A' | 'B' | null>(null);
+const nounSlot = ref<'A' | 'B' | null>(null);
+
+const hoverSlot = ref<'A' | 'B' | null>(null);
 
 const isModifierLeft = computed(() => (props.layout || 'modifier-left') === 'modifier-left');
 
-const nounX = computed(() => isModifierLeft.value ? RIGHT_TARGET : LEFT_TARGET);
-const targetModifierX = computed(() => isModifierLeft.value ? LEFT_TARGET : RIGHT_TARGET);
-const initialModifierX = computed(() => isModifierLeft.value ? FAR_RIGHT : FAR_LEFT);
+const resetPositions = () => {
+  modifierX.value = LIBRARY_LEFT_X;
+  modifierY.value = 200;
+  nounX.value = LIBRARY_RIGHT_X;
+  nounY.value = 200;
+  modifierSlot.value = null;
+  nounSlot.value = null;
+  hoverSlot.value = null;
+  isMerged.value = false;
+  isWrong.value = false;
+};
 
-const modifierX = ref(initialModifierX.value);
-const modifierY = ref(0);
-
-watch(() => props.layout, () => {
-  modifierX.value = initialModifierX.value;
-  modifierY.value = 0;
-}, { immediate: true });
+watch(() => props.layout, resetPositions, { immediate: true });
 
 let startClientX = 0;
 let startClientY = 0;
 let startLeft = 0;
 let startTop = 0;
 
-const startDrag = (e: PointerEvent) => {
-  if (isMerged.value) return;
-  draggingType.value = 'modifier';
+const startDrag = (e: PointerEvent, type: 'modifier' | 'noun') => {
+  // 👇 抖動動畫期間禁止拖拽
+  if (isMerged.value || isWrong.value) return;
+  draggingType.value = type;
   e.preventDefault();
 
   startClientX = e.clientX;
   startClientY = e.clientY;
-  startLeft = modifierX.value;
-  startTop = modifierY.value;
+  startLeft = type === 'modifier' ? modifierX.value : nounX.value;
+  startTop = type === 'modifier' ? modifierY.value : nounY.value;
 
   window.addEventListener('pointermove', onDrag);
   window.addEventListener('pointerup', stopDrag);
 };
 
 const onDrag = (e: PointerEvent) => {
-  if (draggingType.value !== 'modifier') return;
+  if (!draggingType.value) return;
   const deltaX = e.clientX - startClientX;
   const deltaY = e.clientY - startClientY;
 
-  modifierX.value = startLeft + deltaX;
-  modifierY.value = startTop + deltaY;
+  const currentX = startLeft + deltaX;
+  const currentY = startTop + deltaY;
 
-  const distance = Math.hypot(modifierX.value - targetModifierX.value, modifierY.value);
-  isNearTarget.value = distance < 60;
+  if (draggingType.value === 'modifier') {
+    modifierX.value = currentX;
+    modifierY.value = currentY;
+  } else {
+    nounX.value = currentX;
+    nounY.value = currentY;
+  }
+
+  const targetY = 0;
+  if (Math.abs(currentY - targetY) < 100) {
+    if (Math.abs(currentX - SLOT_A_X) < 80) {
+      hoverSlot.value = 'A';
+    } else if (Math.abs(currentX - SLOT_B_X) < 80) {
+      hoverSlot.value = 'B';
+    } else {
+      hoverSlot.value = null;
+    }
+  } else {
+    hoverSlot.value = null;
+  }
 };
 
 const stopDrag = () => {
-  if (draggingType.value !== 'modifier') return;
+  if (!draggingType.value) return;
   window.removeEventListener('pointermove', onDrag);
   window.removeEventListener('pointerup', stopDrag);
 
-  const mCenter = modifierX.value + PIECE_SIZE / 2;
-  let hasCrossedCenter = false;
-  if (isModifierLeft.value) {
-    hasCrossedCenter = mCenter < CENTER_X;
-  } else {
-    hasCrossedCenter = mCenter > CENTER_X + (PIECE_SIZE / 2);
+  const type = draggingType.value;
+  const targetY = 0;
+  let isPlaced = false;
+
+  if (hoverSlot.value !== null) {
+    const slot = hoverSlot.value;
+    const isOccupied = type === 'modifier' ? nounSlot.value === slot : modifierSlot.value === slot;
+
+    if (!isOccupied) {
+      if (type === 'modifier') {
+        modifierX.value = slot === 'A' ? SLOT_A_X : SLOT_B_X;
+        modifierY.value = targetY;
+        modifierSlot.value = slot;
+      } else {
+        nounX.value = slot === 'A' ? SLOT_A_X : SLOT_B_X;
+        nounY.value = targetY;
+        nounSlot.value = slot;
+      }
+      isPlaced = true;
+    }
   }
 
-  const distanceToTarget = Math.hypot(modifierX.value - targetModifierX.value, modifierY.value);
+  if (!isPlaced) {
+    if (type === 'modifier') {
+      modifierX.value = LIBRARY_LEFT_X;
+      modifierY.value = 200;
+      modifierSlot.value = null;
+    } else {
+      nounX.value = LIBRARY_RIGHT_X;
+      nounY.value = 200;
+      nounSlot.value = null;
+    }
+  }
 
-  if (hasCrossedCenter && distanceToTarget < 60) {
+  hoverSlot.value = null;
+  draggingType.value = null;
+
+  if (modifierSlot.value && nounSlot.value) {
+    checkAnswer();
+  }
+};
+
+const checkAnswer = () => {
+  let isCorrect = false;
+  if (isModifierLeft.value) {
+    isCorrect = modifierSlot.value === 'A' && nounSlot.value === 'B';
+  } else {
+    isCorrect = nounSlot.value === 'A' && modifierSlot.value === 'B';
+  }
+
+  if (isCorrect) {
     playSuccess();
     isMerged.value = true;
-
-    modifierX.value = targetModifierX.value;
-    modifierY.value = 0;
-
     setTimeout(() => {
       showExplanation.value = true;
     }, 800);
   } else {
     playError();
-    emit('misconception', 'PUZZLE_ERROR'); // 發送拼圖錯誤代碼
-    modifierX.value = initialModifierX.value;
-    modifierY.value = 0;
-    isNearTarget.value = false;
-  }
+    emit('misconception', 'PUZZLE_ERROR');
 
-  draggingType.value = null;
+    // 👇 觸發錯誤狀態 (紅框 + 抖動)
+    isWrong.value = true;
+
+    // 抖動 800 毫秒後，彈回原位並清除錯誤狀態
+    setTimeout(() => {
+      isWrong.value = false;
+      resetPositions();
+    }, 800);
+  }
 };
 
 const continueToNext = () => {
@@ -140,41 +207,63 @@ const continueToNext = () => {
       </div>
 
       <div class="puzzle-wrapper">
-        <div class="puzzle-board">
+        <!-- 👇 加上 isWrong 綁定，讓整個畫布抖動 -->
+        <div class="puzzle-board" :class="{ 'shake': isWrong }">
           <div class="center-line"></div>
 
-          <div class="puzzle-piece noun-piece" :style="{ left: `${nounX}px` }">
-            <img :src="nounImage" alt="noun" draggable="false" />
+          <!-- 👇 上方：兩個空白槽位 (錯誤時紅框) -->
+          <div class="slot" :class="{
+            'hover': hoverSlot === 'A',
+            'filled': modifierSlot === 'A' || nounSlot === 'A',
+            'wrong': isWrong // 錯誤時紅框
+          }" :style="{ left: `${SLOT_A_X}px` }">
+            <span v-if="!modifierSlot && !nounSlot && !hoverSlot && !isWrong" class="slot-text">空格 A</span>
           </div>
 
-          <div class="target-slot" :class="{ 'highlight': isNearTarget }" :style="{
-            left: `${targetModifierX}px`,
-            borderColor: isNearTarget ? '#58cc02' : '#ccc',
-            backgroundColor: isNearTarget ? '#f0fff0' : 'transparent',
-            opacity: isMerged ? 0 : 1
-          }">
-            <span v-if="!draggingType && !isMerged" class="slot-hint">放這裡</span>
+          <div class="slot" :class="{
+            'hover': hoverSlot === 'B',
+            'filled': modifierSlot === 'B' || nounSlot === 'B',
+            'wrong': isWrong // 錯誤時紅框
+          }" :style="{ left: `${SLOT_B_X}px` }">
+            <span v-if="!modifierSlot && !nounSlot && !hoverSlot && !isWrong" class="slot-text">空格 B</span>
           </div>
 
-          <div class="puzzle-piece modifier-piece"
-            :class="{ 'dragging': draggingType === 'modifier', 'merged': isMerged }" :style="{
+          <!-- 👇 下方：圖庫 (錯誤時紅框) -->
+          <div class="puzzle-piece" :class="{
+            'dragging': draggingType === 'modifier',
+            'in-slot': modifierSlot !== null,
+            'wrong-piece': isWrong // 錯誤時紅框
+          }" :style="{
               left: `${modifierX}px`,
               top: `${modifierY}px`,
               transition: draggingType === 'modifier' ? 'none' : 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
               zIndex: draggingType === 'modifier' ? 10 : 2
-            }" @pointerdown="startDrag">
+            }" @pointerdown="startDrag($event, 'modifier')">
             <img :src="modifierImage" alt="modifier" draggable="false" />
+          </div>
+
+          <div class="puzzle-piece" :class="{
+            'dragging': draggingType === 'noun',
+            'in-slot': nounSlot !== null,
+            'wrong-piece': isWrong // 錯誤時紅框
+          }" :style="{
+              left: `${nounX}px`,
+              top: `${nounY}px`,
+              transition: draggingType === 'noun' ? 'none' : 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+              zIndex: draggingType === 'noun' ? 10 : 1
+            }" @pointerdown="startDrag($event, 'noun')">
+            <img :src="nounImage" alt="noun" draggable="false" />
           </div>
         </div>
       </div>
 
-      <p class="hint" :class="{ 'fade-out': isMerged }">
-        <span v-if="!isMerged">請將圖片拖曳到虛線框內</span>
+      <p class="hint" :class="{ 'fade-out': isMerged || isWrong }">
+        <span v-if="!isMerged && !isWrong">請將下方的兩張圖，分別拖曳到上方的空格中。</span>
+        <span v-if="isWrong" class="error-text">排列順序不對喔，再想想看！</span>
       </p>
 
       <Transition name="pop-up">
         <div v-if="showExplanation" class="explanation-card">
-          <!-- 👇 這裡改成吃 Props 的動態內容 -->
           <h3>{{ explanationTitle || '✨ 你發現了嗎？' }}</h3>
           <p class="explanation-text">{{ explanationDesc || '在英文中，修飾語的位置是：' }}</p>
 
@@ -203,7 +292,8 @@ const continueToNext = () => {
 </template>
 
 <style scoped>
-/* 樣式保持不變 */
+/* 原有樣式保持不變，新增錯誤狀態與抖動動畫 */
+
 .contrast-puzzle {
   display: flex;
   flex-direction: column;
@@ -251,21 +341,61 @@ const continueToNext = () => {
 .puzzle-board {
   position: relative;
   width: 600px;
-  height: 140px;
+  height: 400px;
   flex-shrink: 0;
 }
 
 .center-line {
   position: absolute;
   left: 300px;
-  top: -20px;
-  bottom: -20px;
+  top: 0;
+  bottom: 180px;
   width: 2px;
   background: #e5e5e5;
   transform: translateX(-50%);
   z-index: 0;
 }
 
+/* 槽位樣式 */
+.slot {
+  position: absolute;
+  top: 0;
+  width: 140px;
+  height: 140px;
+  border: 4px dashed #ccc;
+  border-radius: 16px;
+  background: #fafafa;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  transition: all 0.2s;
+  z-index: 1;
+}
+
+.slot.hover {
+  border-color: #1cb0f6;
+  background: #e6f7ff;
+  transform: scale(1.05);
+}
+
+.slot.filled {
+  border: none;
+  background: transparent;
+}
+
+/* 👇 錯誤時的空格紅框 */
+.slot.wrong {
+  border-color: #ff4b4b !important;
+  background: #ffe6e6;
+}
+
+.slot-text {
+  color: #ccc;
+  font-weight: bold;
+  font-size: 1.2rem;
+}
+
+/* 拼圖塊樣式 */
 .puzzle-piece {
   position: absolute;
   width: 140px;
@@ -275,8 +405,23 @@ const continueToNext = () => {
   border: 4px solid #1cb0f6;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
   border-radius: 16px;
-  top: 0;
   touch-action: none;
+  cursor: grab;
+}
+
+.puzzle-piece:active {
+  cursor: grabbing;
+}
+
+.puzzle-piece.in-slot {
+  border-color: #58cc02;
+  box-shadow: 0 0 0 4px rgba(88, 204, 2, 0.2);
+}
+
+/* 👇 錯誤時的圖片紅框 */
+.puzzle-piece.wrong-piece {
+  border-color: #ff4b4b !important;
+  box-shadow: 0 0 0 4px rgba(255, 75, 75, 0.2);
 }
 
 .puzzle-piece img {
@@ -286,49 +431,33 @@ const continueToNext = () => {
   pointer-events: none;
 }
 
-.noun-piece {
-  z-index: 1;
+/* 👇 抖動動畫 */
+.shake {
+  animation: shake 0.4s cubic-bezier(.36, .07, .19, .97) both;
 }
 
-.modifier-piece {
-  cursor: grab;
-  border-color: #ff4b4b;
-  background: #fff0f0;
-}
+@keyframes shake {
 
-.modifier-piece:active {
-  cursor: grabbing;
-}
+  10%,
+  90% {
+    transform: translate3d(-2px, 0, 0);
+  }
 
-.modifier-piece.merged {
-  border-color: #58cc02;
-  background: #ffffff;
-  cursor: default;
-}
+  20%,
+  80% {
+    transform: translate3d(4px, 0, 0);
+  }
 
-.target-slot {
-  position: absolute;
-  width: 140px;
-  height: 140px;
-  border: 4px dashed #ccc;
-  border-radius: 16px;
-  top: 0;
-  z-index: 0;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  transition: all 0.3s ease;
-}
+  30%,
+  50%,
+  70% {
+    transform: translate3d(-8px, 0, 0);
+  }
 
-.target-slot.highlight {
-  border-style: solid;
-  box-shadow: 0 0 0 8px rgba(88, 204, 2, 0.2);
-}
-
-.slot-hint {
-  color: #ccc;
-  font-weight: bold;
-  font-size: 1.2rem;
+  40%,
+  60% {
+    transform: translate3d(8px, 0, 0);
+  }
 }
 
 .hint {
@@ -339,8 +468,8 @@ const continueToNext = () => {
   margin-bottom: 20px;
 }
 
-.success-text {
-  color: #58cc02;
+.error-text {
+  color: #ff4b4b;
 }
 
 .english-display {
