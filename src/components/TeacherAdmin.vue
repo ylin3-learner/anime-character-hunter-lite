@@ -259,7 +259,7 @@ const saveQuestion = () => {
   };
 
   // 👇 儲存克漏字
-  if (questionMode.value === 'reduce' && (clozePrefix.value || clozeSuffix.value)) {
+  if ((clozePrefix.value || clozeSuffix.value)) {
     newQuestion.contextCloze = {
       prefix: clozePrefix.value,
       suffix: clozeSuffix.value
@@ -411,14 +411,14 @@ const saveAllAndClose = () => {
                 @focus="activeUploadTarget = null" />
             </div>
 
-            <!-- 👇 新增：克漏字上下文輸入框 -->
-            <div class="form-group" v-if="questionType === 'standard' && questionMode === 'reduce'">
-              <label>克漏字上下文 (選填，但強烈建議填寫)</label>
+            <!-- 👇 修改：克漏字上下文輸入框，現在 Build 和 Reduce 都能用 -->
+            <div class="form-group" v-if="questionType === 'standard'">
+              <label>克漏字上下文 (選填，建議填寫以提供語境)</label>
               <div style="display: flex; gap: 8px; align-items: center;">
-                <input v-model="clozePrefix" type="text" placeholder="Ex: The ball" style="flex: 1;"
+                <input v-model="clozePrefix" type="text" placeholder="Ex: The girl" style="flex: 1;"
                   @focus="activeUploadTarget = null" />
-                <span style="font-weight: bold; color: #777;">[ 簡化後的片語 ]</span>
-                <input v-model="clozeSuffix" type="text" placeholder="Ex: is dirty." style="flex: 1;"
+                <span style="font-weight: bold; color: #777;">[ 修飾語 ]</span>
+                <input v-model="clozeSuffix" type="text" placeholder="Ex: is my sister." style="flex: 1;"
                   @focus="activeUploadTarget = null" />
               </div>
             </div>
