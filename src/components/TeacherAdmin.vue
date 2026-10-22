@@ -5,12 +5,23 @@ import { VueDraggable } from 'vue-draggable-plus';
 
 const props = defineProps<{
   currentQuestions: QuestionData[];
+  // 接收全域教學階段
+  currentStages?: ('input' | 'macro' | 'micro' | 'pronunciation' | 'noticing')[];
 }>();
+
+// 全域教學階段設定
+const globalStages = ref<('input' | 'macro' | 'micro' | 'pronunciation' | 'noticing')[]>(
+  props.currentStages || ['input', 'macro', 'micro', 'pronunciation', 'noticing']
+);
+
+// 控制側邊欄面板的展開與收合
+const isStagesExpanded = ref(true);
+const isQuestionsExpanded = ref(true);
 
 const questionMode = ref<'build' | 'reduce'>('build');
 
 const emit = defineEmits<{
-  (e: 'update', questions: QuestionData[]): void;
+  (e: 'update', questions: QuestionData[], stages: ('input' | 'macro' | 'micro' | 'pronunciation' | 'noticing')[]): void;
   (e: 'close'): void;
 }>();
 
@@ -19,7 +30,6 @@ const localQuestions = ref<QuestionData[]>(JSON.parse(JSON.stringify(props.curre
 // 表單狀態
 const editingId = ref<string | null>(null);
 const questionType = ref<'standard' | 'contrast'>('standard');
-const enabledStages = ref<('input' | 'macro' | 'micro' | 'pronunciation' | 'noticing')[]>(['input', 'macro', 'micro', 'pronunciation', 'noticing']);
 
 const imageUrl = ref('');
 const targetNoun = ref('');
@@ -36,7 +46,7 @@ const distractorsInput = ref('');
 const explanationTitle = ref('');
 const explanationDesc = ref('');
 
-// 👇 新增：克漏字狀態
+// 克漏字狀態
 const clozePrefix = ref('');
 const clozeSuffix = ref('');
 
@@ -52,7 +62,6 @@ const resetForm = () => {
   editingId.value = null;
   questionType.value = 'standard';
   questionMode.value = 'build';
-  enabledStages.value = ['input', 'macro', 'micro', 'pronunciation', 'noticing'];
   imageUrl.value = '';
   targetNoun.value = '';
   relativeSentence.value = '';
@@ -73,7 +82,6 @@ const editQuestion = (q: QuestionData) => {
   editingId.value = q.id;
   questionType.value = q.type;
   questionMode.value = q.mode || 'build';
-  enabledStages.value = q.enabledStages || ['input', 'macro', 'micro', 'pronunciation', 'noticing'];
   imageUrl.value = q.imageUrl;
   targetNoun.value = q.targetNoun;
   relativeSentence.value = q.grammarFeature.relative.label;
@@ -228,7 +236,6 @@ const saveQuestion = () => {
       person: 'person'
     },
     imageUrl: imageUrl.value || 'https://api.dicebear.com/7.x/adventurer/svg?seed=default',
-    enabledStages: enabledStages.value,
     grammarFeature: {
       relative: { label: relativeSentence.value, tiles: finalTiles, correctAnswer: relCorrect, distractors },
       preposition: { label: prepositionSentence.value, tiles: prepTiles, correctAnswer: prepCorrect }
@@ -258,7 +265,6 @@ const saveQuestion = () => {
     }
   };
 
-  // 👇 儲存克漏字
   if ((clozePrefix.value || clozeSuffix.value)) {
     newQuestion.contextCloze = {
       prefix: clozePrefix.value,
@@ -290,7 +296,7 @@ const saveAllAndClose = () => {
     alert('題庫不能為空，請至少保留一題。');
     return;
   }
-  emit('update', localQuestions.value);
+  emit('update', localQuestions.value, globalStages.value);
   emit('close');
 };
 </script>
@@ -299,33 +305,71 @@ const saveAllAndClose = () => {
   <Teleport to="body">
     <div class="admin-modal">
       <div class="admin-layout">
+
+        <!-- 左側邊欄 -->
         <div class="sidebar">
           <div class="sidebar-header">
             <h2>📚 課前備課中心</h2>
             <p>請在此準備好所有題目，完成後點擊下方按鈕進入學生模式。</p>
           </div>
-          <div class="question-list">
-            <VueDraggable v-model="localQuestions" :animation="150" ghostClass="ghost" class="question-list">
-              <div v-for="(q, index) in localQuestions" :key="q.id" class="question-item"
-                :class="{ active: editingId === q.id }" @click="editQuestion(q)">
-                <div class="q-index">
-                  第 {{ index + 1 }} 關
-                  <span class="q-type-tag" :class="q.type">{{ q.type === 'contrast' ? '對比題' : '標準題' }}</span>
-                </div>
-                <div class="q-content">
-                  <span class="q-noun">{{ q.targetNoun }}</span>
-                  <span class="q-desc">{{ q.grammarFeature?.relative?.label || '未設定句型' }}</span>
-                </div>
-                <button class="btn-delete" @click.stop="deleteQuestion(q.id)">✕</button>
+
+          <!-- 折疊面板 1：本堂課教學流程 -->
+          <div class="sidebar-section">
+            <div class="section-header" @click="isStagesExpanded = !isStagesExpanded">
+              <h3>🎯 本堂課教學流程</h3>
+              <span class="toggle-icon">{{ isStagesExpanded ? '▲' : '▼' }}</span>
+            </div>
+            <div v-show="isStagesExpanded" class="section-content global-stages">
+              <div class="stage-checkboxes"
+                style="background: transparent; border: none; padding: 0; gap: 8px; display: flex; flex-direction: column;">
+                <label style="font-size: 0.9rem;"><input type="checkbox" value="input" v-model="globalStages">
+                  聽力輸入</label>
+                <label style="font-size: 0.9rem;"><input type="checkbox" value="macro" v-model="globalStages">
+                  巨觀拖拉</label>
+                <label style="font-size: 0.9rem;"><input type="checkbox" value="micro" v-model="globalStages">
+                  字磚重組</label>
+                <label style="font-size: 0.9rem;"><input type="checkbox" value="pronunciation" v-model="globalStages">
+                  語音練習</label>
+                <label style="font-size: 0.9rem;"><input type="checkbox" value="noticing" v-model="globalStages"> 意識提升
+                  (最後一題)</label>
               </div>
-            </VueDraggable>
-            <button class="btn-new" @click="resetForm" :class="{ active: editingId === null }">➕ 新增題目</button>
+            </div>
           </div>
+
+          <!-- 折疊面板 2：題目列表 -->
+          <div class="sidebar-section" style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
+            <div class="section-header" @click="isQuestionsExpanded = !isQuestionsExpanded">
+              <h3>📝 題目列表</h3>
+              <span class="toggle-icon">{{ isQuestionsExpanded ? '▲' : '▼' }}</span>
+            </div>
+
+            <div v-show="isQuestionsExpanded" style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
+              <div class="question-list">
+                <VueDraggable v-model="localQuestions" :animation="150" ghostClass="ghost" class="question-list-inner">
+                  <div v-for="(q, index) in localQuestions" :key="q.id" class="question-item"
+                    :class="{ active: editingId === q.id }" @click="editQuestion(q)">
+                    <div class="q-index">
+                      第 {{ index + 1 }} 關
+                      <span class="q-type-tag" :class="q.type">{{ q.type === 'contrast' ? '對比題' : '標準題' }}</span>
+                    </div>
+                    <div class="q-content">
+                      <span class="q-noun">{{ q.targetNoun }}</span>
+                      <span class="q-desc">{{ q.grammarFeature?.relative?.label || '未設定句型' }}</span>
+                    </div>
+                    <button class="btn-delete" @click.stop="deleteQuestion(q.id)">✕</button>
+                  </div>
+                </VueDraggable>
+                <button class="btn-new" @click="resetForm" :class="{ active: editingId === null }">➕ 新增題目</button>
+              </div>
+            </div>
+          </div>
+
           <div class="sidebar-footer">
             <button class="btn-close" @click="saveAllAndClose">✅ 完成備課，開始上課</button>
           </div>
         </div>
 
+        <!-- 右側編輯區 -->
         <div class="editor">
           <div class="editor-header">
             <h3>{{ isEditing ? '✏️ 編輯題目' : '🆕 新增題目' }}</h3>
@@ -339,14 +383,6 @@ const saveAllAndClose = () => {
 
           <div class="editor-body">
             <div class="form-group" v-if="questionType === 'standard'">
-              <label>啟用教學階段 (可根據課堂時間自由勾選)</label>
-              <div class="stage-checkboxes">
-                <label><input type="checkbox" value="input" v-model="enabledStages"> 聽力輸入</label>
-                <label><input type="checkbox" value="macro" v-model="enabledStages"> 巨觀拖拉</label>
-                <label><input type="checkbox" value="micro" v-model="enabledStages"> 字磚重組</label>
-                <label><input type="checkbox" value="pronunciation" v-model="enabledStages"> 語音練習</label>
-                <label><input type="checkbox" value="noticing" v-model="enabledStages"> 意識提升</label>
-              </div>
               <label>題目模式</label>
               <div class="type-switcher">
                 <button :class="{ active: questionMode === 'build' }" @click="questionMode = 'build'">
@@ -411,7 +447,6 @@ const saveAllAndClose = () => {
                 @focus="activeUploadTarget = null" />
             </div>
 
-            <!-- 👇 修改：克漏字上下文輸入框，現在 Build 和 Reduce 都能用 -->
             <div class="form-group" v-if="questionType === 'standard'">
               <label>克漏字上下文 (選填，建議填寫以提供語境)</label>
               <div style="display: flex; gap: 8px; align-items: center;">
@@ -475,7 +510,102 @@ const saveAllAndClose = () => {
 </template>
 
 <style scoped>
-/* 原有樣式保持不變 */
+/* 側邊欄基礎設定 */
+.sidebar {
+  width: 320px;
+  background: #f7f9fc;
+  border-right: 2px solid #e5e5e5;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.sidebar-header {
+  padding: 24px;
+  border-bottom: 2px solid #e5e5e5;
+  flex-shrink: 0;
+}
+
+.sidebar-header h2 {
+  margin: 0 0 8px 0;
+  font-size: 1.2rem;
+  color: #1cb0f6;
+}
+
+.sidebar-header p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #777;
+  line-height: 1.5;
+}
+
+/* 折疊面板容器 */
+.sidebar-section {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 2px solid #e5e5e5;
+}
+
+/* 折疊面板標題 */
+.section-header {
+  padding: 16px 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  background: #f0f4f8;
+  transition: background 0.2s;
+  user-select: none;
+}
+
+.section-header:hover {
+  background: #e2e8f0;
+}
+
+.section-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: #1cb0f6;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toggle-icon {
+  font-size: 0.8rem;
+  color: #777;
+}
+
+/* 折疊面板內容 */
+.section-content {
+  padding: 16px 24px;
+  background: #ffffff;
+}
+
+/* 題目列表專屬滾動區 */
+.question-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.question-list-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sidebar-footer {
+  padding: 24px;
+  background: #ffffff;
+  border-top: 2px solid #e5e5e5;
+  flex-shrink: 0;
+}
+
+/* 其他原有樣式保持不變 */
 .stage-checkboxes {
   display: flex;
   flex-wrap: wrap;
@@ -541,41 +671,6 @@ const saveAllAndClose = () => {
     transform: scale(1);
     opacity: 1;
   }
-}
-
-.sidebar {
-  width: 320px;
-  background: #f7f9fc;
-  border-right: 2px solid #e5e5e5;
-  display: flex;
-  flex-direction: column;
-}
-
-.sidebar-header {
-  padding: 24px;
-  border-bottom: 2px solid #e5e5e5;
-}
-
-.sidebar-header h2 {
-  margin: 0 0 8px 0;
-  font-size: 1.2rem;
-  color: #1cb0f6;
-}
-
-.sidebar-header p {
-  margin: 0;
-  font-size: 0.85rem;
-  color: #777;
-  line-height: 1.5;
-}
-
-.question-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
 }
 
 .question-item {
@@ -692,12 +787,6 @@ const saveAllAndClose = () => {
   border-color: #58cc02;
   color: #58cc02;
   background: #f0fff0;
-}
-
-.sidebar-footer {
-  padding: 24px;
-  background: #ffffff;
-  border-top: 2px solid #e5e5e5;
 }
 
 .btn-close {
