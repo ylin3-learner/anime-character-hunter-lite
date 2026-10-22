@@ -1,7 +1,7 @@
 import type { QuestionData } from '../data/questions';
 import { supabase } from './supabaseClient';
 
-// 新增：學習軌跡型別
+// 學習軌跡型別
 export interface LearningLog {
   id?: number;
   student_name: string;
@@ -29,20 +29,46 @@ export const CloudDatabase = {
     }
   },
 
-  // 將題庫存到雲端
+  // 將題庫存到雲端（包含同步刪除）
   async saveQuestions(questions: QuestionData[]): Promise<boolean> {
     try {
-      const rows = questions.map(q => ({
-        id: q.id,
-        data: q
-      }));
-
-      // 👇 改用 upsert，並指定以 id 作為衝突判定
-      const { error } = await supabase
+      // 👇 1. 先取得雲端現有的所有題目 ID
+      const { data: cloudData, error: fetchError } = await supabase
         .from('questions')
-        .upsert(rows, { onConflict: 'id' });
+        .select('id');
+      
+      if (fetchError) throw fetchError;
 
-      if (error) throw error;
+      const cloudIds = cloudData?.map(d => d.id) || [];
+      const localIds = questions.map(q => q.id);
+
+      // 👇 2. 找出「雲端有，但本地已經被刪除」的 ID
+      const idsToDelete = cloudIds.filter(id => !localIds.includes(id));
+
+      // 👇 3. 如果有需要刪除的題目，執行批次刪除
+      if (idsToDelete.length > 0) {
+        const { error: deleteError } = await supabase
+          .from('questions')
+          .delete()
+          .in('id', idsToDelete);
+        
+        if (deleteError) throw deleteError;
+      }
+
+      // 👇 4. 執行 upsert（更新既有的，插入新的）
+      if (questions.length > 0) {
+        const rows = questions.map(q => ({
+          id: q.id,
+          data: q
+        }));
+
+        const { error: upsertError } = await supabase
+          .from('questions')
+          .upsert(rows, { onConflict: 'id' });
+
+        if (upsertError) throw upsertError;
+      }
+
       return true;
     } catch (error) {
       console.error('儲存到雲端失敗:', error);
@@ -50,7 +76,7 @@ export const CloudDatabase = {
     }
   },
 
-  // 新增：寫入學習軌跡
+  // 寫入學習軌跡
   async logEvent(log: LearningLog): Promise<void> {
     try {
       console.log('🚀 準備寫入軌跡:', log);
@@ -61,7 +87,7 @@ export const CloudDatabase = {
     }
   },
 
-  // 新增：讀取所有學習軌跡 (給教師儀表板用)
+  // 讀取所有學習軌跡
   async fetchLogs(): Promise<LearningLog[]> {
     try {
       const { data, error } = await supabase
@@ -77,11 +103,9 @@ export const CloudDatabase = {
     }
   },
 
-  // 👇 新增：批次刪除所有學習軌跡
+  // 批次刪除所有學習軌跡
   async clearAllLogs(): Promise<boolean> {
     try {
-      // 這裡使用 batch delete，條件是 id 不等於 0 (等於刪除所有)
-      // 這比一筆一筆刪除快非常多
       const { error } = await supabase
         .from('learning_logs')
         .delete()
