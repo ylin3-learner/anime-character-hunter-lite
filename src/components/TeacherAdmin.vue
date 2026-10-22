@@ -5,23 +5,17 @@ import { VueDraggable } from 'vue-draggable-plus';
 
 const props = defineProps<{
   currentQuestions: QuestionData[];
-  // 接收全域教學階段
-  currentStages?: ('input' | 'macro' | 'micro' | 'pronunciation' | 'noticing')[];
 }>();
 
-// 全域教學階段設定
-const globalStages = ref<('input' | 'macro' | 'micro' | 'pronunciation' | 'noticing')[]>(
-  props.currentStages || ['input', 'macro', 'micro', 'pronunciation', 'noticing']
-);
-
-// 控制側邊欄面板的展開與收合
-const isStagesExpanded = ref(true);
-const isQuestionsExpanded = ref(true);
-
+// 單題流程設定
+const enabledStages = ref<('input' | 'macro' | 'micro' | 'pronunciation' | 'noticing')[]>(['input', 'macro', 'micro', 'pronunciation', 'noticing']);
 const questionMode = ref<'build' | 'reduce'>('build');
 
+// 折疊面板狀態
+const isQuestionsExpanded = ref(true);
+
 const emit = defineEmits<{
-  (e: 'update', questions: QuestionData[], stages: ('input' | 'macro' | 'micro' | 'pronunciation' | 'noticing')[]): void;
+  (e: 'update', questions: QuestionData[]): void;
   (e: 'close'): void;
 }>();
 
@@ -62,6 +56,7 @@ const resetForm = () => {
   editingId.value = null;
   questionType.value = 'standard';
   questionMode.value = 'build';
+  enabledStages.value = ['input', 'macro', 'micro', 'pronunciation', 'noticing'];
   imageUrl.value = '';
   targetNoun.value = '';
   relativeSentence.value = '';
@@ -82,6 +77,8 @@ const editQuestion = (q: QuestionData) => {
   editingId.value = q.id;
   questionType.value = q.type;
   questionMode.value = q.mode || 'build';
+  // 如果是舊題目沒有 enabledStages，預設全開
+  enabledStages.value = q.enabledStages || ['input', 'macro', 'micro', 'pronunciation', 'noticing'];
   imageUrl.value = q.imageUrl;
   targetNoun.value = q.targetNoun;
   relativeSentence.value = q.grammarFeature.relative.label;
@@ -129,12 +126,10 @@ const handleFileChange = (event: Event) => {
 const handlePaste = (event: ClipboardEvent) => {
   const items = event.clipboardData?.items;
   if (!items) return;
-
   let hasImage = false;
   for (const item of items) {
     if (item.type.indexOf('image') !== -1) hasImage = true;
   }
-
   if (!hasImage) return;
 
   if (!activeUploadTarget.value) {
@@ -163,7 +158,6 @@ const processImage = (file: File, target: 'noun' | 'modifier') => {
     alert('圖片太大囉！請上傳小於 2MB 的圖片。');
     return;
   }
-
   const reader = new FileReader();
   reader.onload = (e) => {
     const img = new Image();
@@ -171,7 +165,6 @@ const processImage = (file: File, target: 'noun' | 'modifier') => {
       const canvas = document.createElement('canvas');
       let { width, height } = img;
       const maxSize = 800;
-
       if (width > height && width > maxSize) {
         height = (height * maxSize) / width;
         width = maxSize;
@@ -179,13 +172,11 @@ const processImage = (file: File, target: 'noun' | 'modifier') => {
         width = (width * maxSize) / height;
         height = maxSize;
       }
-
       canvas.width = width;
       canvas.height = height;
       const ctx = canvas.getContext('2d');
       ctx?.drawImage(img, 0, 0, width, height);
       const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
-
       if (target === 'noun') {
         imageUrl.value = compressedBase64;
       } else {
@@ -229,6 +220,7 @@ const saveQuestion = () => {
     id: editingId.value || `q_${Date.now()}`,
     type: questionType.value,
     mode: questionMode.value,
+    enabledStages: enabledStages.value, // 👈 確保這裡有存入
     targetNoun: targetNoun.value,
     antecedent: {
       noun: targetNoun.value,
@@ -266,10 +258,7 @@ const saveQuestion = () => {
   };
 
   if ((clozePrefix.value || clozeSuffix.value)) {
-    newQuestion.contextCloze = {
-      prefix: clozePrefix.value,
-      suffix: clozeSuffix.value
-    };
+    newQuestion.contextCloze = { prefix: clozePrefix.value, suffix: clozeSuffix.value };
   }
 
   if (questionType.value === 'contrast') {
@@ -296,7 +285,7 @@ const saveAllAndClose = () => {
     alert('題庫不能為空，請至少保留一題。');
     return;
   }
-  emit('update', localQuestions.value, globalStages.value);
+  emit('update', localQuestions.value);
   emit('close');
 };
 </script>
@@ -313,30 +302,6 @@ const saveAllAndClose = () => {
             <p>請在此準備好所有題目，完成後點擊下方按鈕進入學生模式。</p>
           </div>
 
-          <!-- 折疊面板 1：本堂課教學流程 -->
-          <div class="sidebar-section">
-            <div class="section-header" @click="isStagesExpanded = !isStagesExpanded">
-              <h3>🎯 本堂課教學流程</h3>
-              <span class="toggle-icon">{{ isStagesExpanded ? '▲' : '▼' }}</span>
-            </div>
-            <div v-show="isStagesExpanded" class="section-content global-stages">
-              <div class="stage-checkboxes"
-                style="background: transparent; border: none; padding: 0; gap: 8px; display: flex; flex-direction: column;">
-                <label style="font-size: 0.9rem;"><input type="checkbox" value="input" v-model="globalStages">
-                  聽力輸入</label>
-                <label style="font-size: 0.9rem;"><input type="checkbox" value="macro" v-model="globalStages">
-                  巨觀拖拉</label>
-                <label style="font-size: 0.9rem;"><input type="checkbox" value="micro" v-model="globalStages">
-                  字磚重組</label>
-                <label style="font-size: 0.9rem;"><input type="checkbox" value="pronunciation" v-model="globalStages">
-                  語音練習</label>
-                <label style="font-size: 0.9rem;"><input type="checkbox" value="noticing" v-model="globalStages"> 意識提升
-                  (最後一題)</label>
-              </div>
-            </div>
-          </div>
-
-          <!-- 折疊面板 2：題目列表 -->
           <div class="sidebar-section" style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
             <div class="section-header" @click="isQuestionsExpanded = !isQuestionsExpanded">
               <h3>📝 題目列表</h3>
@@ -382,19 +347,28 @@ const saveAllAndClose = () => {
           </div>
 
           <div class="editor-body">
+            <div class="form-group">
+              <label>本題教學流程</label>
+              <div class="stage-checkboxes">
+                <label v-if="questionType === 'standard'"><input type="checkbox" value="input" v-model="enabledStages">
+                  聽力輸入</label>
+                <label v-if="questionType === 'standard'"><input type="checkbox" value="macro" v-model="enabledStages">
+                  巨觀拖拉</label>
+                <label><input type="checkbox" value="micro" v-model="enabledStages"> 字磚重組</label>
+                <label v-if="questionType === 'standard'"><input type="checkbox" value="pronunciation"
+                    v-model="enabledStages"> 語音練習</label>
+                <label><input type="checkbox" value="noticing" v-model="enabledStages"> 意識提升</label>
+              </div>
+            </div>
+
             <div class="form-group" v-if="questionType === 'standard'">
               <label>題目模式</label>
               <div class="type-switcher">
-                <button :class="{ active: questionMode === 'build' }" @click="questionMode = 'build'">
-                  一般組句題 (Build)
-                </button>
-                <button :class="{ active: questionMode === 'reduce' }" @click="questionMode = 'reduce'">
-                  關係子句轉換題 (Reduce)
-                </button>
+                <button :class="{ active: questionMode === 'build' }" @click="questionMode = 'build'">一般組句題
+                  (Build)</button>
+                <button :class="{ active: questionMode === 'reduce' }" @click="questionMode = 'reduce'">關係子句轉換題
+                  (Reduce)</button>
               </div>
-              <p v-if="questionMode === 'reduce'" style="font-size: 0.8rem; color: #ff9800; margin-top: 8px;">
-                提示：轉換題請將正確答案設定為簡化後的句子（如：under the chair），並將 that, is 設為干擾磚。
-              </p>
             </div>
 
             <div class="form-group">
@@ -469,7 +443,6 @@ const saveAllAndClose = () => {
                 <input v-model="chineseHighlight" type="text" placeholder="Ex: 穿藍色制服的"
                   @focus="activeUploadTarget = null" />
               </div>
-
               <div class="form-group">
                 <label>拼圖排列方向</label>
                 <div class="type-switcher">
@@ -479,7 +452,6 @@ const saveAllAndClose = () => {
                     @click="puzzleLayout = 'modifier-right'">佈局 B (修飾語在右)</button>
                 </div>
               </div>
-
               <div class="form-group">
                 <label>解釋卡標題</label>
                 <input v-model="explanationTitle" type="text" placeholder="Ex: ✨ 你發現了嗎？"
@@ -510,129 +482,7 @@ const saveAllAndClose = () => {
 </template>
 
 <style scoped>
-/* 側邊欄基礎設定 */
-.sidebar {
-  width: 320px;
-  background: #f7f9fc;
-  border-right: 2px solid #e5e5e5;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-.sidebar-header {
-  padding: 24px;
-  border-bottom: 2px solid #e5e5e5;
-  flex-shrink: 0;
-}
-
-.sidebar-header h2 {
-  margin: 0 0 8px 0;
-  font-size: 1.2rem;
-  color: #1cb0f6;
-}
-
-.sidebar-header p {
-  margin: 0;
-  font-size: 0.85rem;
-  color: #777;
-  line-height: 1.5;
-}
-
-/* 折疊面板容器 */
-.sidebar-section {
-  display: flex;
-  flex-direction: column;
-  border-bottom: 2px solid #e5e5e5;
-}
-
-/* 折疊面板標題 */
-.section-header {
-  padding: 16px 24px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  cursor: pointer;
-  background: #f0f4f8;
-  transition: background 0.2s;
-  user-select: none;
-}
-
-.section-header:hover {
-  background: #e2e8f0;
-}
-
-.section-header h3 {
-  margin: 0;
-  font-size: 1rem;
-  color: #1cb0f6;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.toggle-icon {
-  font-size: 0.8rem;
-  color: #777;
-}
-
-/* 折疊面板內容 */
-.section-content {
-  padding: 16px 24px;
-  background: #ffffff;
-}
-
-/* 題目列表專屬滾動區 */
-.question-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.question-list-inner {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.sidebar-footer {
-  padding: 24px;
-  background: #ffffff;
-  border-top: 2px solid #e5e5e5;
-  flex-shrink: 0;
-}
-
-/* 其他原有樣式保持不變 */
-.stage-checkboxes {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  background: #f9f9f9;
-  padding: 16px;
-  border-radius: 12px;
-  border: 2px solid #e5e5e5;
-}
-
-.stage-checkboxes label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: bold;
-  color: #555;
-  cursor: pointer;
-  margin-bottom: 0;
-}
-
-.stage-checkboxes input {
-  width: 18px;
-  height: 18px;
-  accent-color: #1cb0f6;
-  cursor: pointer;
-}
-
+/* 樣式保持不變 */
 .admin-modal {
   position: fixed;
   top: 0;
@@ -671,6 +521,252 @@ const saveAllAndClose = () => {
     transform: scale(1);
     opacity: 1;
   }
+}
+
+.sidebar {
+  width: 320px;
+  background: #f7f9fc;
+  border-right: 2px solid #e5e5e5;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.sidebar-header {
+  padding: 24px;
+  border-bottom: 2px solid #e5e5e5;
+  flex-shrink: 0;
+}
+
+.sidebar-header h2 {
+  margin: 0 0 8px 0;
+  font-size: 1.2rem;
+  color: #1cb0f6;
+}
+
+.sidebar-header p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #777;
+  line-height: 1.5;
+}
+
+.sidebar-section {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 2px solid #e5e5e5;
+}
+
+.section-header {
+  padding: 16px 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  background: #f0f4f8;
+  transition: background 0.2s;
+  user-select: none;
+}
+
+.section-header:hover {
+  background: #e2e8f0;
+}
+
+.section-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: #1cb0f6;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toggle-icon {
+  font-size: 0.8rem;
+  color: #777;
+}
+
+.question-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.question-list-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sidebar-footer {
+  padding: 24px;
+  background: #ffffff;
+  border-top: 2px solid #e5e5e5;
+  flex-shrink: 0;
+}
+
+.editor {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  min-width: 0;
+}
+
+.editor-header {
+  padding: 24px 32px;
+  border-bottom: 2px solid #f0f0f0;
+  flex-shrink: 0;
+}
+
+.editor-header h3 {
+  margin: 0;
+  color: #333;
+  font-size: 1.3rem;
+}
+
+.type-switcher {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.type-switcher button {
+  flex: 1;
+  padding: 10px;
+  background: #f0f0f0;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  font-weight: bold;
+  color: #777;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.type-switcher button.active {
+  background: #e6f7ff;
+  border-color: #1cb0f6;
+  color: #1cb0f6;
+}
+
+.editor-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 32px;
+}
+
+.form-group {
+  margin-bottom: 24px;
+  display: flex;
+  flex-direction: column;
+}
+
+.form-group label {
+  font-weight: bold;
+  margin-bottom: 10px;
+  color: #555;
+  font-size: 0.95rem;
+}
+
+.form-group input[type="text"] {
+  padding: 16px;
+  border: 2px solid #e5e5e5;
+  border-radius: 12px;
+  font-size: 1.05rem;
+  outline: none;
+  transition: border 0.2s;
+  background: #fafafa;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.form-group input[type="text"]:focus {
+  border-color: #1cb0f6;
+  background: #ffffff;
+  box-shadow: 0 0 0 4px rgba(28, 176, 246, 0.1);
+}
+
+.upload-area {
+  border: 2px dashed #ccc;
+  border-radius: 16px;
+  height: 180px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  overflow: hidden;
+  background: #fafafa;
+  transition: all 0.2s;
+}
+
+.upload-area:hover {
+  border-color: #1cb0f6;
+  background: #e6f7ff;
+}
+
+.upload-area.active-upload {
+  border-color: #58cc02;
+  background: #f0fff0;
+  box-shadow: 0 0 0 4px rgba(88, 204, 2, 0.2);
+}
+
+.upload-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: #999;
+  font-weight: bold;
+}
+
+.upload-placeholder .icon {
+  font-size: 2rem;
+}
+
+.preview-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.editor-footer {
+  padding: 24px 32px;
+  border-top: 2px solid #f0f0f0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 16px;
+  background: #fafafa;
+  flex-shrink: 0;
+}
+
+.stage-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  background: #f9f9f9;
+  padding: 16px;
+  border-radius: 12px;
+  border: 2px solid #e5e5e5;
+}
+
+.stage-checkboxes label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: bold;
+  color: #555;
+  cursor: pointer;
+  margin-bottom: 0;
+}
+
+.stage-checkboxes input {
+  width: 18px;
+  height: 18px;
+  accent-color: #1cb0f6;
+  cursor: pointer;
 }
 
 .question-item {
@@ -806,137 +902,6 @@ const saveAllAndClose = () => {
 .btn-close:active {
   border-bottom-width: 0;
   transform: translateY(4px);
-}
-
-.editor {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  background: #ffffff;
-}
-
-.editor-header {
-  padding: 24px 32px;
-  border-bottom: 2px solid #f0f0f0;
-}
-
-.editor-header h3 {
-  margin: 0;
-  color: #333;
-  font-size: 1.3rem;
-}
-
-.type-switcher {
-  display: flex;
-  gap: 10px;
-  margin-top: 16px;
-}
-
-.type-switcher button {
-  flex: 1;
-  padding: 10px;
-  background: #f0f0f0;
-  border: 2px solid transparent;
-  border-radius: 12px;
-  font-weight: bold;
-  color: #777;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.type-switcher button.active {
-  background: #e6f7ff;
-  border-color: #1cb0f6;
-  color: #1cb0f6;
-}
-
-.editor-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 32px;
-}
-
-.form-group {
-  margin-bottom: 24px;
-  display: flex;
-  flex-direction: column;
-}
-
-.form-group label {
-  font-weight: bold;
-  margin-bottom: 10px;
-  color: #555;
-  font-size: 0.95rem;
-}
-
-.form-group input[type="text"] {
-  padding: 16px;
-  border: 2px solid #e5e5e5;
-  border-radius: 12px;
-  font-size: 1.05rem;
-  outline: none;
-  transition: border 0.2s;
-  background: #fafafa;
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.form-group input[type="text"]:focus {
-  border-color: #1cb0f6;
-  background: #ffffff;
-  box-shadow: 0 0 0 4px rgba(28, 176, 246, 0.1);
-}
-
-.upload-area {
-  border: 2px dashed #ccc;
-  border-radius: 16px;
-  height: 180px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  cursor: pointer;
-  overflow: hidden;
-  background: #fafafa;
-  transition: all 0.2s;
-}
-
-.upload-area:hover {
-  border-color: #1cb0f6;
-  background: #e6f7ff;
-}
-
-.upload-area.active-upload {
-  border-color: #58cc02;
-  background: #f0fff0;
-  box-shadow: 0 0 0 4px rgba(88, 204, 2, 0.2);
-}
-
-.upload-placeholder {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  color: #999;
-  font-weight: bold;
-}
-
-.upload-placeholder .icon {
-  font-size: 2rem;
-}
-
-.preview-img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.editor-footer {
-  padding: 24px 32px;
-  border-top: 2px solid #f0f0f0;
-  display: flex;
-  justify-content: flex-end;
-  gap: 16px;
-  background: #fafafa;
 }
 
 .btn-cancel {

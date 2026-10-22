@@ -21,11 +21,6 @@ const questionBank = ref<QuestionData[]>([]);
 const currentStage = ref<'input' | 'macro' | 'micro' | 'success' | 'noticing'>('macro');
 const currentMode = ref<'relative' | 'preposition'>('relative');
 
-// 👇 新增：全域教學流程設定 (預設值)
-const lessonStages = ref<('input' | 'macro' | 'micro' | 'pronunciation' | 'noticing')[]>([
-  'input', 'macro', 'micro', 'pronunciation', 'noticing'
-]);
-
 const { playSuccess } = useSound();
 
 const showAdminAuth = ref(false);
@@ -37,12 +32,6 @@ const showSummary = ref(false);
 const completedCount = ref(0);
 
 onMounted(async () => {
-  // 👇 先讀取本機儲存的課程設定
-  const savedStages = localStorage.getItem('global_lesson_stages');
-  if (savedStages) {
-    try { lessonStages.value = JSON.parse(savedStages); } catch (e) { }
-  }
-
   const cloudQuestions = await CloudDatabase.fetchQuestions();
 
   if (cloudQuestions && cloudQuestions.length > 0) {
@@ -63,9 +52,8 @@ onMounted(async () => {
 
 const currentQuestion = computed(() => questionBank.value[currentIndex.value] || defaultQuestions[0]);
 
-// 👇 修改：讀取全局設定
 const getEnabledStages = computed(() => {
-  return lessonStages.value;
+  return currentQuestion.value.enabledStages || ['input', 'macro', 'micro', 'pronunciation', 'noticing'];
 });
 
 const checkAndSetInitialStage = () => {
@@ -140,32 +128,29 @@ const handleSuccess = () => {
   }
 };
 
-// 👇 核心修改：只在最後一題彈出 NoticingBoard
 const nextQuestion = () => {
   window.speechSynthesis.cancel();
 
-  const isLastQuestion = currentIndex.value >= questionBank.value.length - 1;
-
-  // 1. 如果是最後一題，且有開啟 noticing 且有資料，就進歸納板
-  if (isLastQuestion && getEnabledStages.value.includes('noticing') && currentQuestion.value.noticingData) {
+  if (currentStage.value === 'success' && getEnabledStages.value.includes('noticing') && currentQuestion.value.noticingData) {
     currentStage.value = 'noticing';
     return;
   }
 
-  // 2. 如果是最後一題，且沒開 noticing (或沒資料)，直接進總結報告
-  if (isLastQuestion) {
+  if (currentIndex.value < questionBank.value.length - 1) {
+    currentIndex.value++;
+    checkAndSetInitialStage();
+  } else {
     showSummary.value = true;
-    return;
   }
-
-  // 3. 不是最後一題，直接進下一題
-  currentIndex.value++;
-  checkAndSetInitialStage();
 };
 
 const handleNoticingComplete = () => {
-  // 歸納板完成後，一定是進總結報告 (因為只會在最後一題觸發)
-  showSummary.value = true;
+  if (currentIndex.value < questionBank.value.length - 1) {
+    currentIndex.value++;
+    checkAndSetInitialStage();
+  } else {
+    showSummary.value = true;
+  }
 };
 
 const restartGame = () => {
@@ -176,13 +161,8 @@ const restartGame = () => {
   checkAndSetInitialStage();
 };
 
-// 👇 接收題庫與全域階段設定
-const updateQuestionBank = async (updatedQuestions: QuestionData[], newStages: string[]) => {
+const updateQuestionBank = async (updatedQuestions: QuestionData[]) => {
   questionBank.value = updatedQuestions;
-  if (newStages) {
-    lessonStages.value = newStages as any;
-    localStorage.setItem('global_lesson_stages', JSON.stringify(newStages));
-  }
   currentIndex.value = 0;
   checkAndSetInitialStage();
   showAdmin.value = false;
@@ -277,12 +257,12 @@ const cancelAuth = () => {
           :chineseHighlight="currentQuestion.contrastData.chineseHighlight"
           :nounImage="currentQuestion.contrastData.nounImage"
           :modifierImage="currentQuestion.contrastData.modifierImage" :englishNoun="currentQuestion.targetNoun"
-          :modifierLabel="currentQuestion.grammarFeature.relative.label"
-          :tiles="currentQuestion.grammarFeature.relative.tiles"
+          :modifierLabel="currentQuestion.grammarFeature.relative.label" :antecedent="currentQuestion.antecedent"
+          :layout="currentQuestion.contrastData.layout" :explanationTitle="currentQuestion.explanation?.title"
+          :explanationDesc="currentQuestion.explanation?.desc" :tiles="currentQuestion.grammarFeature.relative.tiles"
           :correctAnswer="currentQuestion.grammarFeature.relative.correctAnswer"
-          :antecedent="currentQuestion.antecedent" :layout="currentQuestion.contrastData.layout"
-          :explanationTitle="currentQuestion.explanation?.title" :explanationDesc="currentQuestion.explanation?.desc"
-          @success="handleSuccess" @misconception="handleMisconception" />
+          :enabledStages="currentQuestion.enabledStages" @success="handleSuccess"
+          @misconception="handleMisconception" />
       </div>
 
       <template v-else>
@@ -328,8 +308,8 @@ const cancelAuth = () => {
       </div>
     </div>
 
-    <TeacherAdmin v-if="showAdmin" :currentQuestions="questionBank" :currentStages="lessonStages"
-      @update="updateQuestionBank" @close="showAdmin = false" />
+    <TeacherAdmin v-if="showAdmin" :currentQuestions="questionBank" @update="updateQuestionBank"
+      @close="showAdmin = false" />
   </div>
 </template>
 

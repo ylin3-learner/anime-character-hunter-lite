@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
-import MicroTileUnscramble from './MicroTileUnscramble.vue';
 import type { Antecedent } from '../rules/types';
 import { useSound } from '../utils/useSound';
 
@@ -13,8 +12,6 @@ const props = defineProps<{
   modifierImage: string;
   englishNoun: string;
   modifierLabel: string;
-  tiles: string[];
-  correctAnswer: string[];
   antecedent: Antecedent;
   layout?: 'modifier-left' | 'modifier-right';
   explanationTitle?: string;
@@ -26,9 +23,7 @@ const emit = defineEmits<{
   (e: 'misconception', code: string): void;
 }>();
 
-// 👇 全新的水平座標系
-const BOARD_WIDTH = 640;
-const SLOT_WIDTH = 140;
+// 座標系設定
 const SLOT_A_X = 180;
 const SLOT_B_X = 320;
 const LIBRARY_LEFT_X = 20;
@@ -37,10 +32,8 @@ const LIBRARY_RIGHT_X = 480;
 const isMerged = ref(false);
 const isWrong = ref(false);
 const showExplanation = ref(false);
-const showEnglish = ref(false);
 const draggingType = ref<'noun' | 'modifier' | null>(null);
 
-// 所有元素初始都在 Y = 0
 const modifierX = ref(LIBRARY_LEFT_X);
 const modifierY = ref(0);
 const nounX = ref(LIBRARY_RIGHT_X);
@@ -54,8 +47,8 @@ const isModifierLeft = computed(() => (props.layout || 'modifier-left') === 'mod
 
 const resetPositions = () => {
   modifierX.value = LIBRARY_LEFT_X;
-  nounX.value = LIBRARY_RIGHT_X;
   modifierY.value = 0;
+  nounX.value = LIBRARY_RIGHT_X;
   nounY.value = 0;
   modifierSlot.value = null;
   nounSlot.value = null;
@@ -101,7 +94,6 @@ const onDrag = (e: PointerEvent) => {
     nounY.value = currentY;
   }
 
-  // 因為都在同一水平線，只要判斷 X 靠近哪個槽位
   if (Math.abs(currentX - SLOT_A_X) < 80) {
     hoverSlot.value = 'A';
   } else if (Math.abs(currentX - SLOT_B_X) < 80) {
@@ -174,9 +166,7 @@ const checkAnswer = () => {
   } else {
     playError();
     emit('misconception', 'PUZZLE_ERROR');
-
     isWrong.value = true;
-
     setTimeout(() => {
       isWrong.value = false;
       resetPositions();
@@ -186,13 +176,14 @@ const checkAnswer = () => {
 
 const continueToNext = () => {
   showExplanation.value = false;
-  showEnglish.value = true;
+  // 👇 這裡不再自己判斷要不要進字磚，直接交給 App.vue 處理
+  emit('success');
 };
 </script>
 
 <template>
   <div class="contrast-puzzle">
-    <div v-if="!showEnglish" class="stage-visual">
+    <div class="stage-visual">
       <div class="chinese-display">
         <h2>
           <span class="highlight">{{ chineseHighlight }}</span>{{ chineseSentence.replace(chineseHighlight, '') }}
@@ -201,52 +192,31 @@ const continueToNext = () => {
 
       <div class="puzzle-wrapper">
         <div class="puzzle-board" :class="{ 'shake': isWrong }">
-          <!-- 中線 (只在兩個 slot 之間) -->
           <div class="center-line"></div>
 
-          <!-- 左槽位 -->
-          <div class="slot" :class="{
-            'hover': hoverSlot === 'A',
-            'filled': modifierSlot === 'A' || nounSlot === 'A',
-            'wrong': isWrong
-          }" :style="{ left: `${SLOT_A_X}px` }">
+          <div class="slot"
+            :class="{ 'hover': hoverSlot === 'A', 'filled': modifierSlot === 'A' || nounSlot === 'A', 'wrong': isWrong }"
+            :style="{ left: `${SLOT_A_X}px` }">
             <span v-if="!modifierSlot && !nounSlot && !hoverSlot && !isWrong" class="slot-text">空格 A</span>
           </div>
 
-          <!-- 右槽位 -->
-          <div class="slot" :class="{
-            'hover': hoverSlot === 'B',
-            'filled': modifierSlot === 'B' || nounSlot === 'B',
-            'wrong': isWrong
-          }" :style="{ left: `${SLOT_B_X}px` }">
+          <div class="slot"
+            :class="{ 'hover': hoverSlot === 'B', 'filled': modifierSlot === 'B' || nounSlot === 'B', 'wrong': isWrong }"
+            :style="{ left: `${SLOT_B_X}px` }">
             <span v-if="!modifierSlot && !nounSlot && !hoverSlot && !isWrong" class="slot-text">空格 B</span>
           </div>
 
-          <!-- 左側圖庫 (修飾語) -->
-          <div class="puzzle-piece" :class="{
-            'dragging': draggingType === 'modifier',
-            'in-slot': modifierSlot !== null,
-            'wrong-piece': isWrong
-          }" :style="{
-            left: `${modifierX}px`,
-            top: `${modifierY}px`,
-            transition: draggingType === 'modifier' ? 'none' : 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-            zIndex: draggingType === 'modifier' ? 10 : 2
-          }" @pointerdown="startDrag($event, 'modifier')">
+          <div class="puzzle-piece"
+            :class="{ 'dragging': draggingType === 'modifier', 'in-slot': modifierSlot !== null, 'wrong-piece': isWrong }"
+            :style="{ left: `${modifierX}px`, top: `${modifierY}px`, transition: draggingType === 'modifier' ? 'none' : 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)', zIndex: draggingType === 'modifier' ? 10 : 2 }"
+            @pointerdown="startDrag($event, 'modifier')">
             <img :src="modifierImage" alt="modifier" draggable="false" />
           </div>
 
-          <!-- 右側圖庫 (名詞) -->
-          <div class="puzzle-piece" :class="{
-            'dragging': draggingType === 'noun',
-            'in-slot': nounSlot !== null,
-            'wrong-piece': isWrong
-          }" :style="{
-            left: `${nounX}px`,
-            top: `${nounY}px`,
-            transition: draggingType === 'noun' ? 'none' : 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-            zIndex: draggingType === 'noun' ? 10 : 1
-          }" @pointerdown="startDrag($event, 'noun')">
+          <div class="puzzle-piece"
+            :class="{ 'dragging': draggingType === 'noun', 'in-slot': nounSlot !== null, 'wrong-piece': isWrong }"
+            :style="{ left: `${nounX}px`, top: `${nounY}px`, transition: draggingType === 'noun' ? 'none' : 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)', zIndex: draggingType === 'noun' ? 10 : 1 }"
+            @pointerdown="startDrag($event, 'noun')">
             <img :src="nounImage" alt="noun" draggable="false" />
           </div>
         </div>
@@ -259,9 +229,7 @@ const continueToNext = () => {
 
       <Transition name="pop-up">
         <div v-if="showExplanation" class="explanation-card">
-          <!-- 👇 只有當老師有填寫時才顯示標題 -->
           <h3 v-if="explanationTitle">{{ explanationTitle }}</h3>
-          <!-- 👇 只有當老師有填寫時才顯示說明 -->
           <p v-if="explanationDesc" class="explanation-text">{{ explanationDesc }}</p>
 
           <div class="english-sentence">
@@ -276,20 +244,11 @@ const continueToNext = () => {
         </div>
       </Transition>
     </div>
-
-    <div v-else class="stage-english">
-      <div class="english-display">
-        <h2 class="english-noun">{{ englishNoun }}</h2>
-        <p class="hint">請排列出正確的字序</p>
-      </div>
-      <MicroTileUnscramble :initialTiles="tiles" :antecedent="antecedent" :correctAnswer="correctAnswer"
-        @success="emit('success')" />
-    </div>
   </div>
 </template>
 
 <style scoped>
-/* 樣式保持不變，只需調整畫布高度 */
+/* 樣式保持不變 */
 .contrast-puzzle {
   display: flex;
   flex-direction: column;
@@ -334,7 +293,6 @@ const continueToNext = () => {
   margin-bottom: 20px;
 }
 
-/* 👇 高度縮減為 160px，讓版面非常緊湊 */
 .puzzle-board {
   position: relative;
   width: 640px;
@@ -342,7 +300,6 @@ const continueToNext = () => {
   flex-shrink: 0;
 }
 
-/* 👇 中線位置與高度 */
 .center-line {
   position: absolute;
   left: 320px;
@@ -464,17 +421,6 @@ const continueToNext = () => {
 
 .error-text {
   color: #ff4b4b;
-}
-
-.english-display {
-  margin-bottom: 24px;
-}
-
-.english-noun {
-  font-size: 2rem;
-  color: #1cb0f6;
-  font-weight: 800;
-  margin: 0 0 8px 0;
 }
 
 .explanation-card {
