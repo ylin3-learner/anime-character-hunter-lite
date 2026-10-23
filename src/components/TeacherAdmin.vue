@@ -3,24 +3,20 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import type { QuestionData } from '../rules/types';
 import { VueDraggable } from 'vue-draggable-plus';
 
-const props = defineProps<{
-  currentQuestions: QuestionData[];
-}>();
+const props = defineProps<{ currentQuestions: QuestionData[]; }>();
 
 const enabledStages = ref<('input' | 'macro' | 'micro' | 'pronunciation' | 'noticing')[]>(['input', 'macro', 'micro', 'pronunciation', 'noticing']);
 const questionMode = ref<'build' | 'reduce'>('build');
 const isQuestionsExpanded = ref(true);
 
-const emit = defineEmits<{
-  (e: 'update', questions: QuestionData[]): void;
-  (e: 'close'): void;
-}>();
+const emit = defineEmits<{ (e: 'update', questions: QuestionData[]): void; (e: 'close'): void; }>();
 
 const localQuestions = ref<QuestionData[]>(JSON.parse(JSON.stringify(props.currentQuestions)));
 
 const editingId = ref<string | null>(null);
-const questionType = ref<'standard' | 'contrast'>('standard');
+const questionType = ref<'standard' | 'contrast' | 'chunk'>('standard'); // 👈 3 大類
 const imageUrl = ref('');
+const distractorImageUrl = ref('');
 const targetNoun = ref('');
 const relativeSentence = ref('');
 const prepositionSentence = ref('');
@@ -32,63 +28,54 @@ const puzzleLayout = ref<'modifier-left' | 'modifier-right'>('modifier-left');
 const distractorsInput = ref('');
 const explanationTitle = ref('');
 const explanationDesc = ref('');
-const reducedSentence = ref('');
 const clozePrefix = ref('');
 const clozeSuffix = ref('');
+const chunkZhInput = ref('');
+const chunkQuizInput = ref('');
+
+// 👈 新增圖片描述欄位
+const correctLabel = ref('');
+const distractorLabel = ref('');
 
 const fileInput = ref<HTMLInputElement | null>(null);
+const distractorFileInput = ref<HTMLInputElement | null>(null);
 const modifierFileInput = ref<HTMLInputElement | null>(null);
-const uploadTarget = ref<'noun' | 'modifier'>('noun');
-const activeUploadTarget = ref<'noun' | 'modifier' | null>(null);
+const uploadTarget = ref<'noun' | 'distractor' | 'modifier'>('noun');
+const activeUploadTarget = ref<'noun' | 'distractor' | 'modifier' | null>(null);
 const isEditing = computed(() => editingId.value !== null);
 
 const resetForm = () => {
-  editingId.value = null;
-  questionType.value = 'standard';
-  questionMode.value = 'build';
+  chunkZhInput.value = ''; chunkQuizInput.value = ''; distractorImageUrl.value = '';
+  correctLabel.value = ''; distractorLabel.value = '';
+  editingId.value = null; questionType.value = 'standard'; questionMode.value = 'build';
   enabledStages.value = ['input', 'macro', 'micro', 'pronunciation', 'noticing'];
-  imageUrl.value = '';
-  targetNoun.value = '';
-  relativeSentence.value = '';
-  prepositionSentence.value = '';
-  tagsInput.value = '';
-  chineseSentence.value = '';
-  chineseHighlight.value = '';
-  modifierImageUrl.value = '';
-  puzzleLayout.value = 'modifier-left';
-  distractorsInput.value = '';
-  explanationTitle.value = '';
-  explanationDesc.value = '';
-  reducedSentence.value = '';
-  clozePrefix.value = '';
-  clozeSuffix.value = '';
+  imageUrl.value = ''; targetNoun.value = ''; relativeSentence.value = ''; prepositionSentence.value = '';
+  tagsInput.value = ''; chineseSentence.value = ''; chineseHighlight.value = ''; modifierImageUrl.value = '';
+  puzzleLayout.value = 'modifier-left'; distractorsInput.value = ''; explanationTitle.value = '';
+  explanationDesc.value = ''; clozePrefix.value = ''; clozeSuffix.value = '';
   activeUploadTarget.value = null;
 };
 
 const editQuestion = (q: QuestionData) => {
-  editingId.value = q.id;
-  questionType.value = q.type;
-  questionMode.value = q.mode || 'build';
-  enabledStages.value = q.enabledStages || ['input', 'macro', 'micro', 'pronunciation', 'noticing'];
-  imageUrl.value = q.imageUrl;
-  targetNoun.value = q.targetNoun;
-  relativeSentence.value = q.grammarFeature.relative.label;
-  prepositionSentence.value = q.grammarFeature.preposition.label;
-  tagsInput.value = q.tags?.join(', ') || '';
-  distractorsInput.value = q.grammarFeature.relative.distractors?.join(', ') || '';
-  explanationTitle.value = q.explanation?.title || '';
-  explanationDesc.value = q.explanation?.desc || '';
-  reducedSentence.value = q.explanation?.reducedSentence || '';
+  chunkZhInput.value = q.previewData?.chunkZh || '';
+  chunkQuizInput.value = q.previewData?.quizOptions ? q.previewData.quizOptions.filter(o => !o.isCorrect).map(o => o.text).join(', ') : '';
+  distractorImageUrl.value = q.inputData?.options.find(o => !o.isCorrect)?.image || '';
 
-  if (q.contextCloze) {
-    clozePrefix.value = q.contextCloze.prefix;
-    clozeSuffix.value = q.contextCloze.suffix;
-  }
+  // 👈 讀取圖片描述
+  correctLabel.value = q.inputData?.options.find(o => o.isCorrect)?.text || '';
+  distractorLabel.value = q.inputData?.options.find(o => !o.isCorrect)?.text || '';
+
+  editingId.value = q.id; questionType.value = q.type; questionMode.value = q.mode || 'build';
+  enabledStages.value = q.enabledStages || ['input', 'macro', 'micro', 'pronunciation', 'noticing'];
+  imageUrl.value = q.imageUrl; targetNoun.value = q.targetNoun;
+  relativeSentence.value = q.grammarFeature.relative.label; prepositionSentence.value = q.grammarFeature.preposition.label;
+  tagsInput.value = q.tags?.join(', ') || ''; distractorsInput.value = q.grammarFeature.relative.distractors?.join(', ') || '';
+  explanationTitle.value = q.explanation?.title || ''; explanationDesc.value = q.explanation?.desc || '';
+
+  if (q.contextCloze) { clozePrefix.value = q.contextCloze.prefix; clozeSuffix.value = q.contextCloze.suffix; }
   if (q.contrastData) {
-    chineseSentence.value = q.contrastData.chineseSentence;
-    chineseHighlight.value = q.contrastData.chineseHighlight;
-    modifierImageUrl.value = q.contrastData.modifierImage;
-    puzzleLayout.value = q.contrastData.layout || 'modifier-left';
+    chineseSentence.value = q.contrastData.chineseSentence; chineseHighlight.value = q.contrastData.chineseHighlight;
+    modifierImageUrl.value = q.contrastData.modifierImage; puzzleLayout.value = q.contrastData.layout || 'modifier-left';
   }
   activeUploadTarget.value = null;
 };
@@ -100,10 +87,10 @@ const deleteQuestion = (id: string) => {
   }
 };
 
-const triggerUpload = (target: 'noun' | 'modifier') => {
-  activeUploadTarget.value = target;
-  uploadTarget.value = target;
+const triggerUpload = (target: 'noun' | 'distractor' | 'modifier') => {
+  activeUploadTarget.value = target; uploadTarget.value = target;
   if (target === 'noun') fileInput.value?.click();
+  else if (target === 'distractor') distractorFileInput.value?.click();
   else modifierFileInput.value?.click();
 };
 
@@ -118,23 +105,13 @@ const handlePaste = (event: ClipboardEvent) => {
   const items = event.clipboardData?.items;
   if (!items) return;
   let hasImage = false;
-  for (const item of items) {
-    if (item.type.indexOf('image') !== -1) hasImage = true;
-  }
+  for (const item of items) { if (item.type.indexOf('image') !== -1) hasImage = true; }
   if (!hasImage) return;
-  if (!activeUploadTarget.value) {
-    alert('請先點擊「角色圖片」或「修飾語圖片」的框框，再按貼上喔！');
-    event.preventDefault();
-    return;
-  }
+  if (!activeUploadTarget.value) { alert('請先點擊圖片框框，再按貼上喔！'); event.preventDefault(); return; }
   for (const item of items) {
     if (item.type.indexOf('image') !== -1) {
       const file = item.getAsFile();
-      if (file) {
-        processImage(file, activeUploadTarget.value);
-        event.preventDefault();
-        break;
-      }
+      if (file) { processImage(file, activeUploadTarget.value); event.preventDefault(); break; }
     }
   }
 };
@@ -142,11 +119,8 @@ const handlePaste = (event: ClipboardEvent) => {
 onMounted(() => { window.addEventListener('paste', handlePaste); });
 onUnmounted(() => { window.removeEventListener('paste', handlePaste); });
 
-const processImage = (file: File, target: 'noun' | 'modifier') => {
-  if (file.size > 2 * 1024 * 1024) {
-    alert('圖片太大囉！請上傳小於 2MB 的圖片。');
-    return;
-  }
+const processImage = (file: File, target: 'noun' | 'distractor' | 'modifier') => {
+  if (file.size > 2 * 1024 * 1024) { alert('圖片太大囉！請上傳小於 2MB 的圖片。'); return; }
   const reader = new FileReader();
   reader.onload = (e) => {
     const img = new Image();
@@ -154,20 +128,16 @@ const processImage = (file: File, target: 'noun' | 'modifier') => {
       const canvas = document.createElement('canvas');
       let { width, height } = img;
       const maxSize = 800;
-      if (width > height && width > maxSize) {
-        height = (height * maxSize) / width;
-        width = maxSize;
-      } else if (height > maxSize) {
-        width = (width * maxSize) / height;
-        height = maxSize;
-      }
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      ctx?.drawImage(img, 0, 0, width, height);
+      if (width > height && width > maxSize) { height = (height * maxSize) / width; width = maxSize; }
+      else if (height > maxSize) { width = (width * maxSize) / height; height = maxSize; }
+      canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext('2d'); ctx?.drawImage(img, 0, 0, width, height);
       const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
+
       if (target === 'noun') imageUrl.value = compressedBase64;
+      else if (target === 'distractor') distractorImageUrl.value = compressedBase64;
       else modifierImageUrl.value = compressedBase64;
+
       activeUploadTarget.value = null;
     };
     img.src = e.target?.result as string;
@@ -180,100 +150,94 @@ const generateTiles = (sentence: string) => {
   const tiles: string[] = [];
   let match;
   while ((match = regex.exec(sentence)) !== null) {
-    if (match[1]) {
-      tiles.push(`[${match[1]}]`);
-    } else if (match[2]) {
-      tiles.push(match[2]);
-    }
+    if (match[1]) tiles.push(`[${match[1]}]`);
+    else if (match[2]) tiles.push(match[2]);
   }
   return tiles;
 };
 
 const saveQuestion = () => {
-  if (!relativeSentence.value || !targetNoun.value) {
-    alert('請至少填寫目標名詞與關係子句！');
-    return;
-  }
+  if (!targetNoun.value) { alert('請填寫目標名詞！'); return; }
+  if (questionType.value !== 'chunk' && !relativeSentence.value) { alert('請填寫關係子句！'); return; }
 
-  const relCorrect = generateTiles(relativeSentence.value);
-
+  const relCorrect = generateTiles(relativeSentence.value || '');
   let distractors = distractorsInput.value.split(/[,，\s]+/).filter(Boolean);
-  if (distractors.length === 0) {
+  if (distractors.length === 0 && questionType.value !== 'chunk') {
     const correctWords = relCorrect.map(w => w.replace(/[\[\]]/g, '').toLowerCase());
     if (correctWords.includes('who') || correctWords.includes('which')) distractors.push('she', 'it');
     if (correctWords.includes('wears') || correctWords.includes('has')) distractors.push('wear', 'have');
     distractors = [...new Set(distractors)].filter(d => !correctWords.includes(d.toLowerCase()));
   }
 
-  const finalTiles = [...relCorrect, ...distractors];
-  finalTiles.sort(() => Math.random() - 0.5);
-
-  const prepTiles = generateTiles(prepositionSentence.value || '');
-  const prepCorrect = [...prepTiles];
-  prepTiles.sort(() => Math.random() - 0.5);
+  const finalTiles = [...relCorrect, ...distractors]; finalTiles.sort(() => Math.random() - 0.5);
+  const prepTiles = generateTiles(prepositionSentence.value || ''); const prepCorrect = [...prepTiles]; prepTiles.sort(() => Math.random() - 0.5);
 
   const newQuestion: QuestionData = {
     id: editingId.value || `q_${Date.now()}`,
-    type: questionType.value,
-    mode: questionMode.value,
-    enabledStages: enabledStages.value,
+    type: questionType.value, mode: questionMode.value, enabledStages: enabledStages.value,
     targetNoun: targetNoun.value,
-    antecedent: {
-      noun: targetNoun.value,
-      number: targetNoun.value.toLowerCase().includes('girl') || targetNoun.value.toLowerCase().includes('boy') ? 'singular' : 'plural',
-      person: 'person'
-    },
+    antecedent: { noun: targetNoun.value, number: targetNoun.value.toLowerCase().includes('girl') || targetNoun.value.toLowerCase().includes('boy') ? 'singular' : 'plural', person: 'person' },
     imageUrl: imageUrl.value || 'https://api.dicebear.com/7.x/adventurer/svg?seed=default',
     tags: tagsInput.value.split(/[,，\s]+/).filter(Boolean),
     grammarFeature: {
-      relative: { label: relativeSentence.value, tiles: finalTiles, correctAnswer: relCorrect, distractors },
-      preposition: { label: prepositionSentence.value, tiles: prepTiles, correctAnswer: prepCorrect }
+      relative: { label: relativeSentence.value || '', tiles: finalTiles, correctAnswer: relCorrect, distractors },
+      preposition: { label: prepositionSentence.value || '', tiles: prepTiles, correctAnswer: prepCorrect }
     },
-    explanation: {
-      title: explanationTitle.value,
-      desc: explanationDesc.value,
-      reducedSentence: reducedSentence.value
-    },
-    inputData: {
-      audioText: `${targetNoun.value} ${relativeSentence.value.replace(/[\[\]]/g, '')} is my favorite.`,
-      // 讓選項直接顯示這張圖代表的英文片語 (拔掉中括號讓畫面乾淨)
-      options: [
-        { 
-          image: imageUrl.value, 
-          text: relativeSentence.value.replace(/[\[\]]/g, ''), // 例如: who is looking up words
-          isCorrect: true 
-        },
-        { 
-          image: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Wrong', 
-          text: 'who is wearing a blue uniform', // 老師可以在後台設定干擾圖片的特徵
-          isCorrect: false 
-        }
-      ]
-    },
-    noticingData: {
-      examples: [
-        `${targetNoun.value} ${relativeSentence.value} is my favorite.`,
-      ],
-      question: `請觀察以上句子，關係代名詞 who 代替的是什麼？`,
-      options: [
-        { text: '事物（Things）', isCorrect: false },
-        { text: '人（People）', isCorrect: true }
-      ],
-      explanation: `沒錯！當先行詞是「人」的時候，我們使用 who 來引導關係子句。`
-    }
+    explanation: { title: explanationTitle.value, desc: explanationDesc.value },
   };
 
-  if ((clozePrefix.value || clozeSuffix.value)) {
-    newQuestion.contextCloze = { prefix: clozePrefix.value, suffix: clozeSuffix.value };
+  if (questionType.value === 'standard') {
+    // 👈 核心優化：如果有填寫克漏字上下文，優先使用它來拼湊 TTS 句子
+    let audioText = '';
+    if (clozePrefix.value || clozeSuffix.value) {
+      const prefix = clozePrefix.value || targetNoun.value;
+      const suffix = clozeSuffix.value || 'is my favorite.';
+      audioText = `${prefix} ${relativeSentence.value.replace(/[\[\]]/g, '')} ${suffix}`.replace(/\s+/g, ' ').trim();
+    } else {
+      audioText = `${targetNoun.value} ${relativeSentence.value.replace(/[\[\]]/g, '')} is my favorite.`;
+    }
+
+    newQuestion.inputData = {
+      audioText: audioText,
+      options: [
+        { image: imageUrl.value, text: correctLabel.value || '', isCorrect: true },
+        { image: distractorImageUrl.value || 'https://api.dicebear.com/7.x/adventurer/svg?seed=Wrong', text: distractorLabel.value || '', isCorrect: false }
+      ]
+    };
+    newQuestion.noticingData = {
+      examples: [audioText],
+      question: `請觀察以上句子，關係代名詞 who 代替的是什麼？`,
+      options: [{ text: '事物（Things）', isCorrect: false }, { text: '人（People）', isCorrect: true }],
+      explanation: `沒錯！當先行詞是「人」的時候，我們使用 who 來引導關係子句。`
+    };
+    if ((clozePrefix.value || clozeSuffix.value)) newQuestion.contextCloze = { prefix: clozePrefix.value, suffix: clozeSuffix.value };
   }
 
   if (questionType.value === 'contrast') {
     newQuestion.contrastData = {
-      chineseSentence: chineseSentence.value || '中文句子',
-      chineseHighlight: chineseHighlight.value || '高亮部分',
+      chineseSentence: chineseSentence.value || '中文句子', chineseHighlight: chineseHighlight.value || '高亮部分',
       nounImage: imageUrl.value || 'https://api.dicebear.com/7.x/adventurer/svg?seed=default',
       modifierImage: modifierImageUrl.value || 'https://api.dicebear.com/7.x/shapes/svg?seed=default',
       layout: puzzleLayout.value
+    };
+  }
+
+  if (questionType.value === 'chunk' || (chunkZhInput.value && questionType.value === 'standard')) {
+    const chunkMatch = relativeSentence.value.match(/\[([^\]]+)\]/);
+    const chunkText = chunkMatch ? chunkMatch[1] : relativeSentence.value;
+
+    let quizOpts = chunkQuizInput.value.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+    if (quizOpts.length === 0) quizOpts = ['look for it', 'look at it'];
+
+    newQuestion.previewData = {
+      targetImage: imageUrl.value || 'https://api.dicebear.com/7.x/adventurer/svg?seed=default',
+      targetNoun: targetNoun.value,
+      chunkText: chunkText,
+      chunkZh: chunkZhInput.value || '（請填寫中文意思）',
+      quizOptions: [
+        { text: chunkText, isCorrect: true },
+        ...quizOpts.map(t => ({ text: t, isCorrect: false }))
+      ].sort(() => Math.random() - 0.5)
     };
   }
 
@@ -287,12 +251,8 @@ const saveQuestion = () => {
 };
 
 const saveAllAndClose = () => {
-  if (localQuestions.value.length === 0) {
-    alert('題庫不能為空，請至少保留一題。');
-    return;
-  }
-  emit('update', localQuestions.value);
-  emit('close');
+  if (localQuestions.value.length === 0) { alert('題庫不能為空，請至少保留一題。'); return; }
+  emit('update', localQuestions.value); emit('close');
 };
 </script>
 
@@ -317,7 +277,8 @@ const saveAllAndClose = () => {
                     :class="{ active: editingId === q.id }" @click="editQuestion(q)">
                     <div class="q-index">
                       第 {{ index + 1 }} 關
-                      <span class="q-type-tag" :class="q.type">{{ q.type === 'contrast' ? '對比題' : '標準題' }}</span>
+                      <span class="q-type-tag" :class="q.type">{{ q.type === 'contrast' ? '對比題' : q.type === 'chunk' ?
+                        '片語題' : '標準題' }}</span>
                     </div>
                     <div class="q-content">
                       <span class="q-noun">{{ q.targetNoun }}</span>
@@ -339,15 +300,14 @@ const saveAllAndClose = () => {
           <div class="editor-header">
             <h3>{{ isEditing ? '✏️ 編輯題目' : '🆕 新增題目' }}</h3>
             <div class="type-switcher">
-              <button :class="{ active: questionType === 'standard' }" @click="questionType = 'standard'">標準題
-                (拖拉+重組)</button>
-              <button :class="{ active: questionType === 'contrast' }" @click="questionType = 'contrast'">對比題
-                (拼圖+中英對照)</button>
+              <button :class="{ active: questionType === 'standard' }" @click="questionType = 'standard'">標準題</button>
+              <button :class="{ active: questionType === 'contrast' }" @click="questionType = 'contrast'">對比題</button>
+              <button :class="{ active: questionType === 'chunk' }" @click="questionType = 'chunk'">片語題</button>
             </div>
           </div>
 
           <div class="editor-body">
-            <div class="form-group">
+            <div class="form-group" v-if="questionType !== 'chunk'">
               <label>本題教學流程</label>
               <div class="stage-checkboxes">
                 <label v-if="questionType === 'standard'"><input type="checkbox" value="input" v-model="enabledStages">
@@ -355,8 +315,7 @@ const saveAllAndClose = () => {
                 <label v-if="questionType === 'standard'"><input type="checkbox" value="macro" v-model="enabledStages">
                   巨觀拖拉</label>
                 <label><input type="checkbox" value="micro" v-model="enabledStages"> 字磚重組</label>
-                <label v-if="questionType === 'standard'"><input type="checkbox" value="pronunciation"
-                    v-model="enabledStages"> 語音練習</label>
+                <label><input type="checkbox" value="pronunciation" v-model="enabledStages"> 語音練習</label>
                 <label><input type="checkbox" value="noticing" v-model="enabledStages"> 意識提升</label>
               </div>
             </div>
@@ -371,69 +330,100 @@ const saveAllAndClose = () => {
               </div>
             </div>
 
-            <div class="form-group">
-              <label>{{ questionType === 'contrast' ? '名詞圖片 (拼圖右側)' : '角色圖片' }}</label>
-              <div class="upload-area" :class="{ 'active-upload': activeUploadTarget === 'noun' }"
-                @click="triggerUpload('noun')">
-                <img v-if="imageUrl" :src="imageUrl" class="preview-img" />
-                <div v-else class="upload-placeholder">
-                  <span class="icon">📸</span>
-                  <span>點擊後「貼上截圖」或選擇圖片</span>
-                  <span v-if="activeUploadTarget === 'noun'" class="text-success">✅ 已就緒！請按 Ctrl+V 貼上</span>
-                  <span v-else>點擊此處選擇圖片，或按 Ctrl+V 貼上</span>
-                </div>
+            <template v-if="questionType === 'chunk'">
+              <div class="form-group">
+                <label>片語內容 (用 [ ] 包住要測驗的片語)</label>
+                <input v-model="relativeSentence" type="text" placeholder="Ex: [looking up words]" />
               </div>
-              <input ref="fileInput" type="file" accept="image/*" style="display: none" @change="handleFileChange" />
-            </div>
+              <div class="form-group">
+                <label>片語中文意思</label>
+                <input v-model="chunkZhInput" type="text" placeholder="Ex: 查單字" />
+              </div>
+              <div class="form-group">
+                <label>錯誤片語選項 (用逗號隔開，供微測驗用)</label>
+                <input v-model="chunkQuizInput" type="text"
+                  placeholder="Ex: looking for his pen, looking at the board" />
+              </div>
+            </template>
 
-            <div class="form-group" v-if="questionType === 'contrast'">
-              <label>修飾語圖片 (拼圖左側)</label>
-              <div class="upload-area" :class="{ 'active-upload': activeUploadTarget === 'modifier' }"
-                @click="triggerUpload('modifier')">
-                <img v-if="modifierImageUrl" :src="modifierImageUrl" class="preview-img" />
-                <div v-else class="upload-placeholder">
-                  <span class="icon">🧩</span>
-                  <span>點擊後「貼上截圖」或選擇圖片</span>
-                  <span v-if="activeUploadTarget === 'modifier'" class="text-success">✅ 已就緒！請按 Ctrl+V 貼上</span>
-                  <span v-else>點擊此處選擇圖片，或按 Ctrl+V 貼上</span>
+            <template v-if="questionType !== 'chunk'">
+              <div class="form-group">
+                <label>{{ questionType === 'contrast' ? '名詞圖片 (拼圖右側)' : '正確角色圖片' }}</label>
+                <div class="upload-area" :class="{ 'active-upload': activeUploadTarget === 'noun' }"
+                  @click="triggerUpload('noun')">
+                  <img v-if="imageUrl" :src="imageUrl" class="preview-img" />
+                  <div v-else class="upload-placeholder"><span class="icon">📸</span><span>點擊上傳或貼上正確圖片</span></div>
                 </div>
+                <input ref="fileInput" type="file" accept="image/*" style="display: none" @change="handleFileChange" />
               </div>
-              <input ref="modifierFileInput" type="file" accept="image/*" style="display: none"
-                @change="handleFileChange" />
-            </div>
+
+              <div class="form-group" v-if="questionType === 'standard'">
+                <label>干擾圖片 (選填，聽力測驗的錯誤選項圖)</label>
+                <div class="upload-area" :class="{ 'active-upload': activeUploadTarget === 'distractor' }"
+                  @click="triggerUpload('distractor')">
+                  <img v-if="distractorImageUrl" :src="distractorImageUrl" class="preview-img" />
+                  <div v-else class="upload-placeholder"><span class="icon">🐱</span><span>點擊上傳干擾圖片</span></div>
+                </div>
+                <input ref="distractorFileInput" type="file" accept="image/*" style="display: none"
+                  @change="handleFileChange" />
+              </div>
+
+              <div class="form-group" v-if="questionType === 'contrast'">
+                <label>修飾語圖片 (拼圖左側)</label>
+                <div class="upload-area" :class="{ 'active-upload': activeUploadTarget === 'modifier' }"
+                  @click="triggerUpload('modifier')">
+                  <img v-if="modifierImageUrl" :src="modifierImageUrl" class="preview-img" />
+                  <div v-else class="upload-placeholder"><span class="icon">🧩</span><span>點擊上傳修飾語圖片</span></div>
+                </div>
+                <input ref="modifierFileInput" type="file" accept="image/*" style="display: none"
+                  @change="handleFileChange" />
+              </div>
+            </template>
 
             <div class="form-row">
               <div class="form-group">
                 <label>目標名詞</label>
-                <input v-model="targetNoun" type="text" placeholder="Ex: The girl" @focus="activeUploadTarget = null" />
+                <input v-model="targetNoun" type="text" placeholder="Ex: The boy" @focus="activeUploadTarget = null" />
               </div>
               <div class="form-group">
-                <label>心智圖標籤 (Tags, 用逗號隔開)</label>
-                <input v-model="tagsInput" type="text" placeholder="Ex: 穿著與顏色, 核心動詞片語"
-                  @focus="activeUploadTarget = null" />
+                <label>心智圖標籤 (Tags)</label>
+                <input v-model="tagsInput" type="text" placeholder="Ex: 穿著與顏色" @focus="activeUploadTarget = null" />
               </div>
             </div>
 
-            <div class="form-group">
-              <label>句型 A：關係子句 (Relative Clause) <span style="color: #1cb0f6; font-size: 0.8rem;">💡 用 [ ]
-                  包住片語，可變成不可分割的字磚塊！</span></label>
+            <div class="form-group" v-if="questionType !== 'chunk'">
+              <label>句型 A：關係子句 <span style="color: #1cb0f6; font-size: 0.8rem;">💡 用 [ ] 包住片語</span></label>
               <input v-model="relativeSentence" type="text" placeholder="Ex: who wears [a blue uniform]"
                 @focus="activeUploadTarget = null" />
             </div>
 
-            <div class="form-group">
-              <label>迷思干擾磚 (選填，若空白系統會自動生成，例: she, which)</label>
+            <div class="form-group" v-if="questionType === 'standard'">
+              <label>迷思干擾磚 (選填)</label>
               <input v-model="distractorsInput" type="text" placeholder="Ex: she, which, wear"
                 @focus="activeUploadTarget = null" />
             </div>
 
             <div class="form-group" v-if="questionType === 'standard'">
-              <label>克漏字上下文 (選填，建議填寫以提供語境)</label>
+              <label>克漏字上下文 (選填，若填寫將用於 TTS 發音句子)</label>
               <div style="display: flex; gap: 8px; align-items: center;">
-                <input v-model="clozePrefix" type="text" placeholder="Ex: The girl" style="flex: 1;"
+                <input v-model="clozePrefix" type="text" placeholder="Ex: The boy" style="flex: 1;"
                   @focus="activeUploadTarget = null" />
                 <span style="font-weight: bold; color: #777;">[ 修飾語 ]</span>
-                <input v-model="clozeSuffix" type="text" placeholder="Ex: is my sister." style="flex: 1;"
+                <input v-model="clozeSuffix" type="text" placeholder="Ex: is my brother." style="flex: 1;"
+                  @focus="activeUploadTarget = null" />
+              </div>
+            </div>
+
+            <!-- 👈 新增圖片文字描述欄位 -->
+            <div class="form-row" v-if="questionType === 'standard'">
+              <div class="form-group">
+                <label>正確圖下方文字 (選填，留空則不顯示)</label>
+                <input v-model="correctLabel" type="text" placeholder="Ex: who is looking up words"
+                  @focus="activeUploadTarget = null" />
+              </div>
+              <div class="form-group">
+                <label>干擾圖下方文字 (選填，留空則不顯示)</label>
+                <input v-model="distractorLabel" type="text" placeholder="Ex: who is looking for his pen"
                   @focus="activeUploadTarget = null" />
               </div>
             </div>
@@ -441,12 +431,12 @@ const saveAllAndClose = () => {
             <template v-if="questionType === 'contrast'">
               <div class="form-group">
                 <label>中文句子</label>
-                <input v-model="chineseSentence" type="text" placeholder="Ex: 穿藍色制服的女孩"
+                <input v-model="chineseSentence" type="text" placeholder="Ex: 戴藍色帽子的女孩"
                   @focus="activeUploadTarget = null" />
               </div>
               <div class="form-group">
                 <label>中文高亮 (修飾語部分)</label>
-                <input v-model="chineseHighlight" type="text" placeholder="Ex: 穿藍色制服的"
+                <input v-model="chineseHighlight" type="text" placeholder="Ex: 戴藍色帽子的"
                   @focus="activeUploadTarget = null" />
               </div>
               <div class="form-group">
@@ -465,18 +455,13 @@ const saveAllAndClose = () => {
               </div>
               <div class="form-group">
                 <label>解釋卡說明</label>
-                <input v-model="explanationDesc" type="text" placeholder="Ex: 在英文中，修飾語要放在名詞的後面喔！"
-                  @focus="activeUploadTarget = null" />
-              </div>
-              <div class="form-group">
-                <label>簡化對比句 (選填，供對比題展示一鍵簡化功能)</label>
-                <input v-model="reducedSentence" type="text" placeholder="Ex: the boy [in a blue uniform]"
+                <input v-model="explanationDesc" type="text" placeholder="Ex: 修飾語要放在名詞的後面喔！"
                   @focus="activeUploadTarget = null" />
               </div>
             </template>
 
-            <div class="form-group" v-else>
-              <label>句型 B：介系詞片語 (Prepositional Phrase)</label>
+            <div class="form-group" v-if="questionType === 'standard'">
+              <label>句型 B：介系詞片語</label>
               <input v-model="prepositionSentence" type="text" placeholder="Ex: [in a blue uniform]"
                 @focus="activeUploadTarget = null" />
             </div>
@@ -493,7 +478,7 @@ const saveAllAndClose = () => {
 </template>
 
 <style scoped>
-/* 樣式保持不變 */
+/* 樣式保持不變，請直接複製貼上 */
 .admin-modal {
   position: fixed;
   top: 0;
@@ -856,6 +841,10 @@ const saveAllAndClose = () => {
 
 .q-type-tag.contrast {
   background: #ff9800;
+}
+
+.q-type-tag.chunk {
+  background: #9c27b0;
 }
 
 .btn-delete {

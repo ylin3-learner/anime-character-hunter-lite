@@ -1,59 +1,5 @@
-export interface QuestionData {
-  id: string;
-  type: 'standard' | 'contrast';
-  mode?: 'build' | 'reduce'; 
-  targetNoun: string;
-  antecedent: {
-    noun: string;
-    number: 'singular' | 'plural';
-    person: 'person' | 'thing';
-  };
-  imageUrl: string;
-  enabledStages?: ('input' | 'macro' | 'micro' | 'pronunciation' | 'noticing')[];
-  
-  // 👇 新增：克漏字上下文
-  contextCloze?: {
-    prefix: string;
-    suffix: string;
-  };
-
-  grammarFeature: {
-    relative: { 
-      label: string; 
-      tiles: string[]; 
-      correctAnswer: string[];
-      distractors?: string[];
-    };
-    preposition: { 
-      label: string; 
-      tiles: string[]; 
-      correctAnswer: string[]; 
-    };
-  };
-  
-  explanation?: {
-    title: string;
-    desc: string;
-  };
-
-  inputData?: {
-    audioText: string;
-    options: { image: string; text: string; isCorrect: boolean }[];
-  };
-  noticingData?: {
-    examples: string[];
-    question: string;
-    options: { text: string; isCorrect: boolean }[];
-    explanation: string;
-  };
-  contrastData?: {
-    chineseSentence: string;
-    chineseHighlight: string;
-    nounImage: string;
-    modifierImage: string;
-    layout?: 'modifier-left' | 'modifier-right';
-  };
-}
+// 👈 刪除原本的 interface，改為直接引入
+import type { QuestionData } from '../rules/types';
 
 export const defaultQuestions: QuestionData[] = [
   {
@@ -79,13 +25,13 @@ export const defaultQuestions: QuestionData[] = [
     },
     explanation: {
       title: '✨ 你發現了嗎？',
-      desc: '在英文中，修飾語要放在名詞的後面喔！'
+      desc: '在英文中，修飾語要放在名詞的後面喔！',
     },
     inputData: {
       audioText: 'The girl who wears a blue uniform is my sister.',
       options: [
-        { image: 'https://api.dicebear.com/7.x/adventurer/svg?seed=AnimeGirl', text: '穿藍色制服的女孩', isCorrect: true },
-        { image: 'https://api.dicebear.com/7.x/adventurer/svg?seed=OtherGirl', text: '穿紅色洋裝的女孩', isCorrect: false }
+        { image: 'https://api.dicebear.com/7.x/adventurer/svg?seed=AnimeGirl', text: 'who wears a blue uniform', isCorrect: true },
+        { image: 'https://api.dicebear.com/7.x/adventurer/svg?seed=OtherGirl', text: 'who wears a red dress', isCorrect: false }
       ]
     },
     noticingData: {

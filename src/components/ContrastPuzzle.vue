@@ -16,7 +16,7 @@ const props = defineProps<{
   layout?: 'modifier-left' | 'modifier-right';
   explanationTitle?: string;
   explanationDesc?: string;
-  reducedSentence?: string; // 👈 接收簡化句
+  // 👈 移除 reducedSentence
 }>();
 
 const emit = defineEmits<{
@@ -32,7 +32,6 @@ const LIBRARY_RIGHT_X = 480;
 const isMerged = ref(false);
 const isWrong = ref(false);
 const showExplanation = ref(false);
-const showReduced = ref(false); // 👈 控制是否顯示簡化動畫
 const draggingType = ref<'noun' | 'modifier' | null>(null);
 
 const modifierX = ref(LIBRARY_LEFT_X);
@@ -47,36 +46,24 @@ const hoverSlot = ref<'A' | 'B' | null>(null);
 const isModifierLeft = computed(() => (props.layout || 'modifier-left') === 'modifier-left');
 
 const resetPositions = () => {
-  modifierX.value = LIBRARY_LEFT_X;
-  modifierY.value = 0;
-  nounX.value = LIBRARY_RIGHT_X;
-  nounY.value = 0;
-  modifierSlot.value = null;
-  nounSlot.value = null;
-  hoverSlot.value = null;
-  isMerged.value = false;
-  isWrong.value = false;
-  showExplanation.value = false;
-  showReduced.value = false;
+  modifierX.value = LIBRARY_LEFT_X; modifierY.value = 0;
+  nounX.value = LIBRARY_RIGHT_X; nounY.value = 0;
+  modifierSlot.value = null; nounSlot.value = null;
+  hoverSlot.value = null; isMerged.value = false;
+  isWrong.value = false; showExplanation.value = false;
 };
 
 watch(() => props.layout, resetPositions, { immediate: true });
 
-let startClientX = 0;
-let startClientY = 0;
-let startLeft = 0;
-let startTop = 0;
+let startClientX = 0; let startClientY = 0; let startLeft = 0; let startTop = 0;
 
 const startDrag = (e: PointerEvent, type: 'modifier' | 'noun') => {
   if (isMerged.value || isWrong.value) return;
   draggingType.value = type;
   e.preventDefault();
-
-  startClientX = e.clientX;
-  startClientY = e.clientY;
+  startClientX = e.clientX; startClientY = e.clientY;
   startLeft = type === 'modifier' ? modifierX.value : nounX.value;
   startTop = type === 'modifier' ? modifierY.value : nounY.value;
-
   window.addEventListener('pointermove', onDrag);
   window.addEventListener('pointerup', stopDrag);
 };
@@ -85,17 +72,11 @@ const onDrag = (e: PointerEvent) => {
   if (!draggingType.value) return;
   const deltaX = e.clientX - startClientX;
   const deltaY = e.clientY - startClientY;
-
   const currentX = startLeft + deltaX;
   const currentY = startTop + deltaY;
 
-  if (draggingType.value === 'modifier') {
-    modifierX.value = currentX;
-    modifierY.value = currentY;
-  } else {
-    nounX.value = currentX;
-    nounY.value = currentY;
-  }
+  if (draggingType.value === 'modifier') { modifierX.value = currentX; modifierY.value = currentY; }
+  else { nounX.value = currentX; nounY.value = currentY; }
 
   if (Math.abs(currentX - SLOT_A_X) < 80) hoverSlot.value = 'A';
   else if (Math.abs(currentX - SLOT_B_X) < 80) hoverSlot.value = 'B';
@@ -113,35 +94,19 @@ const stopDrag = () => {
   if (hoverSlot.value !== null) {
     const slot = hoverSlot.value;
     const isOccupied = type === 'modifier' ? nounSlot.value === slot : modifierSlot.value === slot;
-
     if (!isOccupied) {
-      if (type === 'modifier') {
-        modifierX.value = slot === 'A' ? SLOT_A_X : SLOT_B_X;
-        modifierY.value = 0;
-        modifierSlot.value = slot;
-      } else {
-        nounX.value = slot === 'A' ? SLOT_A_X : SLOT_B_X;
-        nounY.value = 0;
-        nounSlot.value = slot;
-      }
+      if (type === 'modifier') { modifierX.value = slot === 'A' ? SLOT_A_X : SLOT_B_X; modifierY.value = 0; modifierSlot.value = slot; }
+      else { nounX.value = slot === 'A' ? SLOT_A_X : SLOT_B_X; nounY.value = 0; nounSlot.value = slot; }
       isPlaced = true;
     }
   }
 
   if (!isPlaced) {
-    if (type === 'modifier') {
-      modifierX.value = LIBRARY_LEFT_X;
-      modifierY.value = 0;
-      modifierSlot.value = null;
-    } else {
-      nounX.value = LIBRARY_RIGHT_X;
-      nounY.value = 0;
-      nounSlot.value = null;
-    }
+    if (type === 'modifier') { modifierX.value = LIBRARY_LEFT_X; modifierY.value = 0; modifierSlot.value = null; }
+    else { nounX.value = LIBRARY_RIGHT_X; nounY.value = 0; nounSlot.value = null; }
   }
 
-  hoverSlot.value = null;
-  draggingType.value = null;
+  hoverSlot.value = null; draggingType.value = null;
 
   if (modifierSlot.value && nounSlot.value) checkAnswer();
 };
@@ -218,27 +183,15 @@ const continueToNext = () => {
           <h3 v-if="explanationTitle">{{ explanationTitle }}</h3>
           <p v-if="explanationDesc" class="explanation-text">{{ explanationDesc }}</p>
 
-          <!-- 👈 新增：動態簡化對比 -->
-          <div class="english-sentence" :class="{ 'reduced-mode': showReduced }">
+          <div class="english-sentence">
             <span class="noun-text">{{ englishNoun }}</span>
-
-            <span v-if="!showReduced" class="highlight-red transition-all">
-              {{ modifierLabel }}
-            </span>
-
-            <span v-if="showReduced" class="reduced-text slide-in">
-              {{ reducedSentence || modifierLabel.replace(/who is |which is |that is /gi, '') }}
-            </span>
+            <span class="highlight-red transition-all"> {{ modifierLabel }} </span>
           </div>
 
           <p class="compare-text">對比中文：<span class="highlight-red">{{ chineseHighlight }}</span>{{
             chineseSentence.replace(chineseHighlight, '') }}</p>
 
-          <!-- 👈 一鍵簡化按鈕 -->
-          <button v-if="!showReduced" class="btn-reduce" @click="showReduced = true">
-            ✨ 看看如何簡化 (Reduce)
-          </button>
-
+          <!-- 👈 移除了簡化按鈕，直接讓學生繼續 -->
           <button class="btn-continue" @click="continueToNext">我懂了，繼續 ➔</button>
         </div>
       </Transition>
@@ -247,7 +200,7 @@ const continueToNext = () => {
 </template>
 
 <style scoped>
-/* 原有樣式保留，加入簡化動畫樣式 */
+/* 樣式沿用你原本的，已移除 reduced-mode 相關特效 */
 .contrast-puzzle {
   display: flex;
   flex-direction: column;
@@ -435,58 +388,10 @@ const continueToNext = () => {
   align-items: center;
   gap: 8px;
   min-height: 72px;
-  transition: all 0.5s ease;
 }
 
 .noun-text {
   color: #1cb0f6;
-}
-
-/* 👈 簡化動畫特效 */
-.transition-all {
-  transition: all 0.4s ease;
-}
-
-.reduced-mode {
-  border-color: #58cc02;
-  background: #f0fff0;
-}
-
-.reduced-text {
-  color: #58cc02;
-  animation: slideIn 0.5s ease-out forwards;
-}
-
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateX(-20px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-.btn-reduce {
-  background: #1cb0f6;
-  color: white;
-  border: none;
-  border-bottom: 4px solid #1899d6;
-  padding: 10px 24px;
-  font-size: 1rem;
-  font-weight: bold;
-  border-radius: 12px;
-  cursor: pointer;
-  transition: all 0.1s;
-  margin-bottom: 12px;
-  margin-right: 12px;
-}
-
-.btn-reduce:active {
-  border-bottom-width: 0;
-  transform: translateY(4px);
 }
 
 .compare-text {

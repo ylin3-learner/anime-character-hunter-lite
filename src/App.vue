@@ -9,6 +9,7 @@ import StructuredInput from './components/StructuredInput.vue';
 import PronunciationAnalyzer from './components/PronunciationAnalyzer.vue';
 import NoticingBoard from './components/NoticingBoard.vue';
 import SummaryReport from './components/SummaryReport.vue';
+import ChunkPreview from './components/ChunkPreview.vue';
 
 import { defaultQuestions } from './data/questions';
 import type { QuestionData } from './rules/types';
@@ -21,7 +22,7 @@ const showAnalytics = ref(false);
 const pendingAction = ref<'admin' | 'analytics' | null>(null);
 const currentIndex = ref(0);
 const questionBank = ref<QuestionData[]>([]);
-const currentStage = ref<'input' | 'macro' | 'micro' | 'success' | 'noticing'>('macro');
+const currentStage = ref<'preview' | 'input' | 'macro' | 'micro' | 'success' | 'noticing'>('preview');
 const currentMode = ref<'relative' | 'preposition'>('relative');
 
 const { playSuccess } = useSound();
@@ -44,7 +45,6 @@ onMounted(async () => {
     const saved = localStorage.getItem('custom_questions');
     if (saved) {
       try { questionBank.value = JSON.parse(saved); } catch (e) {
-        // 👈 加上 as unknown as 解決舊題庫的型別推斷衝突
         questionBank.value = [...defaultQuestions] as unknown as QuestionData[];
       }
     } else {
@@ -66,7 +66,14 @@ const checkAndSetInitialStage = () => {
     return;
   }
 
-  if (getEnabledStages.value.includes('input') && currentQuestion.value.inputData) {
+  if (currentQuestion.value.type === 'chunk') {
+    currentStage.value = 'preview';
+    return;
+  }
+
+  if (currentQuestion.value.previewData && getEnabledStages.value.includes('input')) {
+    currentStage.value = 'preview';
+  } else if (getEnabledStages.value.includes('input') && currentQuestion.value.inputData) {
     currentStage.value = 'input';
   } else if (getEnabledStages.value.includes('macro')) {
     currentStage.value = 'macro';
@@ -74,6 +81,14 @@ const checkAndSetInitialStage = () => {
     currentStage.value = 'micro';
   } else {
     currentStage.value = 'success';
+  }
+};
+
+const handlePreviewSuccess = () => {
+  if (currentQuestion.value.type === 'chunk') {
+    handleSuccess();
+  } else {
+    currentStage.value = 'input';
   }
 };
 
@@ -91,31 +106,14 @@ const fullSentenceData = computed(() => {
 });
 
 const handleMisconception = (code: string) => {
-  console.log('🚨 App.vue 接收到迷思事件:', code);
-
-  if (!sessionLog.value.includes(code)) {
-    sessionLog.value.push(code);
-  }
-
-  CloudDatabase.logEvent({
-    student_name: '匿名學生',
-    question_id: currentQuestion.value.id,
-    error_code: code
-  }).then(() => {
-    console.log('✅ 軌跡已成功發送至 Supabase');
-  }).catch((err) => {
-    console.error('❌ 寫入 Supabase 失敗:', err);
-  });
+  if (!sessionLog.value.includes(code)) sessionLog.value.push(code);
+  CloudDatabase.logEvent({ student_name: '匿名學生', question_id: currentQuestion.value.id, error_code: code });
 };
 
 const handleInputSuccess = () => {
-  if (getEnabledStages.value.includes('macro')) {
-    currentStage.value = 'macro';
-  } else if (getEnabledStages.value.includes('micro')) {
-    currentStage.value = 'micro';
-  } else {
-    currentStage.value = 'success';
-  }
+  if (getEnabledStages.value.includes('macro')) currentStage.value = 'macro';
+  else if (getEnabledStages.value.includes('micro')) currentStage.value = 'micro';
+  else currentStage.value = 'success';
 };
 
 const handleUnpack = (type: 'relative' | 'preposition') => {
@@ -126,20 +124,15 @@ const handleUnpack = (type: 'relative' | 'preposition') => {
 const handleSuccess = () => {
   playSuccess();
   currentStage.value = 'success';
-
-  if (completedCount.value <= currentIndex.value) {
-    completedCount.value = currentIndex.value + 1;
-  }
+  if (completedCount.value <= currentIndex.value) completedCount.value = currentIndex.value + 1;
 };
 
 const nextQuestion = () => {
   window.speechSynthesis.cancel();
-
   if (currentStage.value === 'success' && getEnabledStages.value.includes('noticing') && currentQuestion.value.noticingData) {
     currentStage.value = 'noticing';
     return;
   }
-
   if (currentIndex.value < questionBank.value.length - 1) {
     currentIndex.value++;
     checkAndSetInitialStage();
@@ -158,69 +151,28 @@ const handleNoticingComplete = () => {
 };
 
 const restartGame = () => {
-  currentIndex.value = 0;
-  sessionLog.value = [];
-  completedCount.value = 0;
-  showSummary.value = false;
+  currentIndex.value = 0; sessionLog.value = []; completedCount.value = 0; showSummary.value = false;
   checkAndSetInitialStage();
 };
 
 const updateQuestionBank = async (updatedQuestions: QuestionData[]) => {
-  questionBank.value = updatedQuestions;
-  currentIndex.value = 0;
-  checkAndSetInitialStage();
-  showAdmin.value = false;
-
+  questionBank.value = updatedQuestions; currentIndex.value = 0; checkAndSetInitialStage(); showAdmin.value = false;
   localStorage.setItem('custom_questions', JSON.stringify(updatedQuestions));
-
   const success = await CloudDatabase.saveQuestions(updatedQuestions);
-  if (!success) {
-    alert('注意：題庫已存在本機，但「雲端同步失敗」，請確認網路連線。');
-  }
+  if (!success) alert('注意：題庫已存在本機，但「雲端同步失敗」，請確認網路連線。');
 };
 
-const openAdmin = () => {
-  if (isAdminAuthenticated.value) {
-    showAdmin.value = true;
-  } else {
-    pendingAction.value = 'admin';
-    showAdminAuth.value = true;
-  }
-};
-
-const openAnalytics = () => {
-  if (isAdminAuthenticated.value) {
-    showAnalytics.value = true;
-  } else {
-    pendingAction.value = 'analytics';
-    showAdminAuth.value = true;
-  }
-};
-
+const openAdmin = () => { if (isAdminAuthenticated.value) showAdmin.value = true; else { pendingAction.value = 'admin'; showAdminAuth.value = true; } };
+const openAnalytics = () => { if (isAdminAuthenticated.value) showAnalytics.value = true; else { pendingAction.value = 'analytics'; showAdminAuth.value = true; } };
 const verifyAdmin = () => {
   if (adminPasswordInput.value === 'admin123') {
-    isAdminAuthenticated.value = true;
-    sessionStorage.setItem('admin_auth', 'true');
-    showAdminAuth.value = false;
-    adminPasswordInput.value = '';
-
-    if (pendingAction.value === 'admin') {
-      showAdmin.value = true;
-    } else if (pendingAction.value === 'analytics') {
-      showAnalytics.value = true;
-    }
+    isAdminAuthenticated.value = true; sessionStorage.setItem('admin_auth', 'true'); showAdminAuth.value = false; adminPasswordInput.value = '';
+    if (pendingAction.value === 'admin') showAdmin.value = true;
+    else if (pendingAction.value === 'analytics') showAnalytics.value = true;
     pendingAction.value = null;
-  } else {
-    alert('密碼錯誤！請聯繫授課教師。');
-    adminPasswordInput.value = '';
-  }
+  } else { alert('密碼錯誤！請聯繫授課教師。'); adminPasswordInput.value = ''; }
 };
-
-const cancelAuth = () => {
-  showAdminAuth.value = false;
-  adminPasswordInput.value = '';
-  pendingAction.value = null;
-};
+const cancelAuth = () => { showAdminAuth.value = false; adminPasswordInput.value = ''; pendingAction.value = null; };
 </script>
 
 <template>
@@ -228,9 +180,7 @@ const cancelAuth = () => {
     <header>
       <h1>🕵️ Anime Character Hunter</h1>
       <div class="header-controls">
-        <div class="progress-bar">
-          第 {{ currentIndex + 1 }} / {{ questionBank.length }} 關
-        </div>
+        <div class="progress-bar">第 {{ currentIndex + 1 }} / {{ questionBank.length }} 關</div>
         <button class="btn-finish" @click="showSummary = true">🏁 結束練習</button>
         <button class="btn-admin" @click="openAdmin">👩‍🏫 教師備課中心</button>
         <button class="btn-analytics" @click="openAnalytics">📊 數據分析</button>
@@ -247,6 +197,7 @@ const cancelAuth = () => {
         <div class="confetti">🎉 ✨ 🏆</div>
         <h2>角色解鎖成功！</h2>
 
+        <!-- 👈 移除 type === 'standard' 限制，對比題也能進行語音練習 -->
         <PronunciationAnalyzer v-if="getEnabledStages.includes('pronunciation')"
           :targetSentence="fullSentenceData.target" :displaySentence="fullSentenceData.display"
           :highlightPart="fullSentenceData.modifier" @skip="nextQuestion" />
@@ -263,40 +214,42 @@ const cancelAuth = () => {
           :modifierImage="currentQuestion.contrastData.modifierImage" :englishNoun="currentQuestion.targetNoun"
           :modifierLabel="currentQuestion.grammarFeature.relative.label" :antecedent="currentQuestion.antecedent"
           :layout="currentQuestion.contrastData.layout" :explanationTitle="currentQuestion.explanation?.title"
-          :explanationDesc="currentQuestion.explanation?.desc"
-          :reducedSentence="currentQuestion.explanation?.reducedSentence" @success="handleSuccess"
+          :explanationDesc="currentQuestion.explanation?.desc" @success="handleSuccess"
           @misconception="handleMisconception" />
       </div>
 
-      <template v-else>
-        <div v-if="currentStage === 'input' && currentQuestion.inputData" class="stage-content">
-          <StructuredInput :audioText="currentQuestion.inputData.audioText" :options="currentQuestion.inputData.options"
-            @success="handleInputSuccess" />
-        </div>
+      <div v-else-if="currentStage === 'preview' && currentQuestion.previewData" class="stage-content">
+        <ChunkPreview :image="currentQuestion.previewData.targetImage" :noun="currentQuestion.previewData.targetNoun"
+          :chunk="currentQuestion.previewData.chunkText" :zhMeaning="currentQuestion.previewData.chunkZh"
+          :quizOptions="currentQuestion.previewData.quizOptions" @success="handlePreviewSuccess" />
+      </div>
 
-        <div v-else-if="currentStage === 'macro'" class="stage-content">
-          <h2 class="instruction">請將角色圖塊拖曳到名詞<strong>後方</strong>。</h2>
-          <div class="target-noun"><span class="highlight">{{ currentQuestion.targetNoun }}</span></div>
-          <MacroDragCanvas :targetNoun="currentQuestion.targetNoun" :grammarFeature="currentQuestion.grammarFeature"
-            :imageUrl="currentQuestion.imageUrl" @unpack="handleUnpack" />
-        </div>
+      <div v-else-if="currentStage === 'input' && currentQuestion.inputData" class="stage-content">
+        <StructuredInput :audioText="currentQuestion.inputData.audioText" :options="currentQuestion.inputData.options"
+          @success="handleInputSuccess" />
+      </div>
 
-        <div v-else-if="currentStage === 'micro'" class="stage-content">
-          <h2 class="instruction">圖塊已解鎖！請排列出正確的字序。</h2>
-          <div class="target-noun"><span class="highlight">{{ currentQuestion.targetNoun }}</span></div>
-          <MicroTileUnscramble
-            :initialTiles="currentQuestion.mode === 'reduce' ? currentQuestion.grammarFeature.relative.tiles : currentQuestion.grammarFeature[currentMode].tiles"
-            :antecedent="currentQuestion.antecedent"
-            :correctAnswer="currentQuestion.mode === 'reduce' ? currentQuestion.grammarFeature.preposition.correctAnswer : currentQuestion.grammarFeature[currentMode].correctAnswer"
-            :mode="currentQuestion.mode || 'build'" :contextCloze="currentQuestion.contextCloze"
-            @success="handleSuccess" @misconception="handleMisconception" />
-        </div>
-      </template>
+      <div v-else-if="currentStage === 'macro'" class="stage-content">
+        <h2 class="instruction">請將角色圖塊拖曳到名詞<strong>後方</strong>。</h2>
+        <div class="target-noun"><span class="highlight">{{ currentQuestion.targetNoun }}</span></div>
+        <MacroDragCanvas :targetNoun="currentQuestion.targetNoun" :grammarFeature="currentQuestion.grammarFeature"
+          :imageUrl="currentQuestion.imageUrl" @unpack="handleUnpack" />
+      </div>
+
+      <div v-else-if="currentStage === 'micro'" class="stage-content">
+        <h2 class="instruction">圖塊已解鎖！請排列出正確的字序。</h2>
+        <div class="target-noun"><span class="highlight">{{ currentQuestion.targetNoun }}</span></div>
+        <MicroTileUnscramble
+          :initialTiles="currentQuestion.mode === 'reduce' ? currentQuestion.grammarFeature.relative.tiles : currentQuestion.grammarFeature[currentMode].tiles"
+          :antecedent="currentQuestion.antecedent"
+          :correctAnswer="currentQuestion.mode === 'reduce' ? currentQuestion.grammarFeature.preposition.correctAnswer : currentQuestion.grammarFeature[currentMode].correctAnswer"
+          :mode="currentQuestion.mode || 'build'" :contextCloze="currentQuestion.contextCloze" @success="handleSuccess"
+          @misconception="handleMisconception" />
+      </div>
     </main>
 
     <SummaryReport v-if="showSummary" :completedLevels="completedCount" :totalLevels="questionBank.length"
       :misconceptions="sessionLog" @restart="restartGame" />
-
     <TeacherAnalytics v-if="showAnalytics" :questionBank="questionBank" @close="showAnalytics = false" />
 
     <div v-if="showAdminAuth" class="auth-overlay">

@@ -13,8 +13,8 @@ const emit = defineEmits<{
 
 const { speak } = useTTS();
 
-const showText = ref(false); // 控制是否顯示文字提示
-const selectedIndex = ref<number | null>(null); // 記錄點選的卡片
+const showText = ref(false);
+const selectedIndex = ref<number | null>(null);
 const isWrong = ref(false);
 const isSuccess = ref(false);
 
@@ -23,21 +23,15 @@ const playAudio = () => {
 };
 
 const handleSelect = (opt: { isCorrect: boolean }, index: number) => {
-  if (isSuccess.value) return; // 已經答對就不處理點擊
-
+  if (isSuccess.value) return;
   selectedIndex.value = index;
 
   if (opt.isCorrect) {
     isSuccess.value = true;
-    // 答對了，稍微停頓後進入下一階段
-    setTimeout(() => {
-      emit('success');
-    }, 1000);
+    setTimeout(() => { emit('success'); }, 1000);
   } else {
-    // 答錯了，震動並重新播放句子
     isWrong.value = true;
     speak(props.audioText);
-
     setTimeout(() => {
       isWrong.value = false;
       selectedIndex.value = null;
@@ -51,15 +45,12 @@ const handleSelect = (opt: { isCorrect: boolean }, index: number) => {
     <h2 class="instruction">🎧 請聽句子，選出符合描述的圖片</h2>
 
     <div class="audio-controls">
-      <button @click="playAudio" class="btn-play">
-        🔊 播放句子
-      </button>
+      <button @click="playAudio" class="btn-play">🔊 播放句子</button>
       <button @click="showText = !showText" class="btn-toggle-text" :class="{ active: showText }">
         {{ showText ? '🙈 隱藏文字' : '👀 顯示文字提示' }}
       </button>
     </div>
 
-    <!-- 文字輔助顯示區塊 -->
     <Transition name="fade">
       <div v-if="showText" class="transcript-hint">
         <p>{{ audioText }}</p>
@@ -72,16 +63,17 @@ const handleSelect = (opt: { isCorrect: boolean }, index: number) => {
         'is-success': isSuccess && selectedIndex === index
       }" @click="handleSelect(opt, index)">
         <img :src="opt.image" :class="{ 'shake': isWrong && selectedIndex === index }" />
-        <!-- 顯示該圖片對應的英文特徵 -->
-        <p class="option-label">{{ opt.text }}</p>
+        <!-- 如果有填寫文字才顯示 -->
+        <p v-if="opt.text" class="option-label">{{ opt.text }}</p>
       </div>
     </div>
 
-    <p v-if="isWrong" class="error-msg">順序不太對喔！再仔細聽一次句子。</p>
+    <p v-if="isWrong" class="error-msg">聽起來不太對喔！再仔細聽一次句子。</p>
   </div>
 </template>
 
 <style scoped>
+/* 樣式保持不變，請直接複製貼上 */
 .structured-input {
   display: flex;
   flex-direction: column;
@@ -167,6 +159,10 @@ const handleSelect = (opt: { isCorrect: boolean }, index: number) => {
   cursor: pointer;
   transition: all 0.2s;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 
 .option-card:hover {
@@ -209,7 +205,6 @@ const handleSelect = (opt: { isCorrect: boolean }, index: number) => {
   animation: slideDown 0.3s;
 }
 
-/* 動畫 */
 @keyframes fadeIn {
   from {
     opacity: 0;
