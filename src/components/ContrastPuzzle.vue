@@ -16,6 +16,7 @@ const props = defineProps<{
   layout?: 'modifier-left' | 'modifier-right';
   explanationTitle?: string;
   explanationDesc?: string;
+  reducedSentence?: string; // 👈 接收簡化句
 }>();
 
 const emit = defineEmits<{
@@ -23,7 +24,6 @@ const emit = defineEmits<{
   (e: 'misconception', code: string): void;
 }>();
 
-// 座標系設定
 const SLOT_A_X = 180;
 const SLOT_B_X = 320;
 const LIBRARY_LEFT_X = 20;
@@ -32,6 +32,7 @@ const LIBRARY_RIGHT_X = 480;
 const isMerged = ref(false);
 const isWrong = ref(false);
 const showExplanation = ref(false);
+const showReduced = ref(false); // 👈 控制是否顯示簡化動畫
 const draggingType = ref<'noun' | 'modifier' | null>(null);
 
 const modifierX = ref(LIBRARY_LEFT_X);
@@ -55,6 +56,8 @@ const resetPositions = () => {
   hoverSlot.value = null;
   isMerged.value = false;
   isWrong.value = false;
+  showExplanation.value = false;
+  showReduced.value = false;
 };
 
 watch(() => props.layout, resetPositions, { immediate: true });
@@ -94,13 +97,9 @@ const onDrag = (e: PointerEvent) => {
     nounY.value = currentY;
   }
 
-  if (Math.abs(currentX - SLOT_A_X) < 80) {
-    hoverSlot.value = 'A';
-  } else if (Math.abs(currentX - SLOT_B_X) < 80) {
-    hoverSlot.value = 'B';
-  } else {
-    hoverSlot.value = null;
-  }
+  if (Math.abs(currentX - SLOT_A_X) < 80) hoverSlot.value = 'A';
+  else if (Math.abs(currentX - SLOT_B_X) < 80) hoverSlot.value = 'B';
+  else hoverSlot.value = null;
 };
 
 const stopDrag = () => {
@@ -144,39 +143,28 @@ const stopDrag = () => {
   hoverSlot.value = null;
   draggingType.value = null;
 
-  if (modifierSlot.value && nounSlot.value) {
-    checkAnswer();
-  }
+  if (modifierSlot.value && nounSlot.value) checkAnswer();
 };
 
 const checkAnswer = () => {
   let isCorrect = false;
-  if (isModifierLeft.value) {
-    isCorrect = modifierSlot.value === 'A' && nounSlot.value === 'B';
-  } else {
-    isCorrect = nounSlot.value === 'A' && modifierSlot.value === 'B';
-  }
+  if (isModifierLeft.value) isCorrect = modifierSlot.value === 'A' && nounSlot.value === 'B';
+  else isCorrect = nounSlot.value === 'A' && modifierSlot.value === 'B';
 
   if (isCorrect) {
     playSuccess();
     isMerged.value = true;
-    setTimeout(() => {
-      showExplanation.value = true;
-    }, 800);
+    setTimeout(() => { showExplanation.value = true; }, 800);
   } else {
     playError();
     emit('misconception', 'PUZZLE_ERROR');
     isWrong.value = true;
-    setTimeout(() => {
-      isWrong.value = false;
-      resetPositions();
-    }, 800);
+    setTimeout(() => { isWrong.value = false; resetPositions(); }, 800);
   }
 };
 
 const continueToNext = () => {
   showExplanation.value = false;
-  // 👇 這裡不再自己判斷要不要進字磚，直接交給 App.vue 處理
   emit('success');
 };
 </script>
@@ -199,7 +187,6 @@ const continueToNext = () => {
             :style="{ left: `${SLOT_A_X}px` }">
             <span v-if="!modifierSlot && !nounSlot && !hoverSlot && !isWrong" class="slot-text">空格 A</span>
           </div>
-
           <div class="slot"
             :class="{ 'hover': hoverSlot === 'B', 'filled': modifierSlot === 'B' || nounSlot === 'B', 'wrong': isWrong }"
             :style="{ left: `${SLOT_B_X}px` }">
@@ -212,7 +199,6 @@ const continueToNext = () => {
             @pointerdown="startDrag($event, 'modifier')">
             <img :src="modifierImage" alt="modifier" draggable="false" />
           </div>
-
           <div class="puzzle-piece"
             :class="{ 'dragging': draggingType === 'noun', 'in-slot': nounSlot !== null, 'wrong-piece': isWrong }"
             :style="{ left: `${nounX}px`, top: `${nounY}px`, transition: draggingType === 'noun' ? 'none' : 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)', zIndex: draggingType === 'noun' ? 10 : 1 }"
@@ -232,13 +218,26 @@ const continueToNext = () => {
           <h3 v-if="explanationTitle">{{ explanationTitle }}</h3>
           <p v-if="explanationDesc" class="explanation-text">{{ explanationDesc }}</p>
 
-          <div class="english-sentence">
+          <!-- 👈 新增：動態簡化對比 -->
+          <div class="english-sentence" :class="{ 'reduced-mode': showReduced }">
             <span class="noun-text">{{ englishNoun }}</span>
-            <span class="highlight-red"> {{ modifierLabel }} </span>
+
+            <span v-if="!showReduced" class="highlight-red transition-all">
+              {{ modifierLabel }}
+            </span>
+
+            <span v-if="showReduced" class="reduced-text slide-in">
+              {{ reducedSentence || modifierLabel.replace(/who is |which is |that is /gi, '') }}
+            </span>
           </div>
 
           <p class="compare-text">對比中文：<span class="highlight-red">{{ chineseHighlight }}</span>{{
             chineseSentence.replace(chineseHighlight, '') }}</p>
+
+          <!-- 👈 一鍵簡化按鈕 -->
+          <button v-if="!showReduced" class="btn-reduce" @click="showReduced = true">
+            ✨ 看看如何簡化 (Reduce)
+          </button>
 
           <button class="btn-continue" @click="continueToNext">我懂了，繼續 ➔</button>
         </div>
@@ -248,7 +247,7 @@ const continueToNext = () => {
 </template>
 
 <style scoped>
-/* 樣式保持不變 */
+/* 原有樣式保留，加入簡化動畫樣式 */
 .contrast-puzzle {
   display: flex;
   flex-direction: column;
@@ -387,30 +386,6 @@ const continueToNext = () => {
   animation: shake 0.4s cubic-bezier(.36, .07, .19, .97) both;
 }
 
-@keyframes shake {
-
-  10%,
-  90% {
-    transform: translate3d(-2px, 0, 0);
-  }
-
-  20%,
-  80% {
-    transform: translate3d(4px, 0, 0);
-  }
-
-  30%,
-  50%,
-  70% {
-    transform: translate3d(-8px, 0, 0);
-  }
-
-  40%,
-  60% {
-    transform: translate3d(8px, 0, 0);
-  }
-}
-
 .hint {
   color: #777;
   font-size: 1.1rem;
@@ -455,10 +430,63 @@ const continueToNext = () => {
   border-radius: 12px;
   margin-bottom: 16px;
   border: 2px dashed #ccc;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  min-height: 72px;
+  transition: all 0.5s ease;
 }
 
 .noun-text {
   color: #1cb0f6;
+}
+
+/* 👈 簡化動畫特效 */
+.transition-all {
+  transition: all 0.4s ease;
+}
+
+.reduced-mode {
+  border-color: #58cc02;
+  background: #f0fff0;
+}
+
+.reduced-text {
+  color: #58cc02;
+  animation: slideIn 0.5s ease-out forwards;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.btn-reduce {
+  background: #1cb0f6;
+  color: white;
+  border: none;
+  border-bottom: 4px solid #1899d6;
+  padding: 10px 24px;
+  font-size: 1rem;
+  font-weight: bold;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.1s;
+  margin-bottom: 12px;
+  margin-right: 12px;
+}
+
+.btn-reduce:active {
+  border-bottom-width: 0;
+  transform: translateY(4px);
 }
 
 .compare-text {
@@ -495,6 +523,30 @@ const continueToNext = () => {
 .pop-up-leave-to {
   opacity: 0;
   transform: translateY(20px) scale(0.9);
+}
+
+@keyframes shake {
+
+  10%,
+  90% {
+    transform: translate3d(-2px, 0, 0);
+  }
+
+  20%,
+  80% {
+    transform: translate3d(4px, 0, 0);
+  }
+
+  30%,
+  50%,
+  70% {
+    transform: translate3d(-8px, 0, 0);
+  }
+
+  40%,
+  60% {
+    transform: translate3d(8px, 0, 0);
+  }
 }
 
 @keyframes fadeIn {

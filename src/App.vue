@@ -9,7 +9,10 @@ import StructuredInput from './components/StructuredInput.vue';
 import PronunciationAnalyzer from './components/PronunciationAnalyzer.vue';
 import NoticingBoard from './components/NoticingBoard.vue';
 import SummaryReport from './components/SummaryReport.vue';
-import { defaultQuestions, type QuestionData } from './data/questions';
+
+import { defaultQuestions } from './data/questions';
+import type { QuestionData } from './rules/types';
+
 import { useSound } from './utils/useSound';
 import { CloudDatabase } from './services/CloudDatabase';
 
@@ -41,16 +44,17 @@ onMounted(async () => {
     const saved = localStorage.getItem('custom_questions');
     if (saved) {
       try { questionBank.value = JSON.parse(saved); } catch (e) {
-        questionBank.value = [...defaultQuestions];
+        // 👈 加上 as unknown as 解決舊題庫的型別推斷衝突
+        questionBank.value = [...defaultQuestions] as unknown as QuestionData[];
       }
     } else {
-      questionBank.value = [...defaultQuestions];
+      questionBank.value = [...defaultQuestions] as unknown as QuestionData[];
     }
   }
   checkAndSetInitialStage();
 });
 
-const currentQuestion = computed(() => questionBank.value[currentIndex.value] || defaultQuestions[0]);
+const currentQuestion = computed(() => questionBank.value[currentIndex.value] || (defaultQuestions[0] as unknown as QuestionData));
 
 const getEnabledStages = computed(() => {
   return currentQuestion.value.enabledStages || ['input', 'macro', 'micro', 'pronunciation', 'noticing'];
@@ -259,9 +263,8 @@ const cancelAuth = () => {
           :modifierImage="currentQuestion.contrastData.modifierImage" :englishNoun="currentQuestion.targetNoun"
           :modifierLabel="currentQuestion.grammarFeature.relative.label" :antecedent="currentQuestion.antecedent"
           :layout="currentQuestion.contrastData.layout" :explanationTitle="currentQuestion.explanation?.title"
-          :explanationDesc="currentQuestion.explanation?.desc" :tiles="currentQuestion.grammarFeature.relative.tiles"
-          :correctAnswer="currentQuestion.grammarFeature.relative.correctAnswer"
-          :enabledStages="currentQuestion.enabledStages" @success="handleSuccess"
+          :explanationDesc="currentQuestion.explanation?.desc"
+          :reducedSentence="currentQuestion.explanation?.reducedSentence" @success="handleSuccess"
           @misconception="handleMisconception" />
       </div>
 
@@ -285,8 +288,8 @@ const cancelAuth = () => {
             :initialTiles="currentQuestion.mode === 'reduce' ? currentQuestion.grammarFeature.relative.tiles : currentQuestion.grammarFeature[currentMode].tiles"
             :antecedent="currentQuestion.antecedent"
             :correctAnswer="currentQuestion.mode === 'reduce' ? currentQuestion.grammarFeature.preposition.correctAnswer : currentQuestion.grammarFeature[currentMode].correctAnswer"
-            :mode="currentQuestion.mode" :contextCloze="currentQuestion.contextCloze" @success="handleSuccess"
-            @misconception="handleMisconception" />
+            :mode="currentQuestion.mode || 'build'" :contextCloze="currentQuestion.contextCloze"
+            @success="handleSuccess" @misconception="handleMisconception" />
         </div>
       </template>
     </main>

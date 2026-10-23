@@ -4,7 +4,7 @@ import { validatePostModifier } from '../rules/grammarRules';
 import type { Antecedent, DiagnosticSignal } from '../rules/types';
 import { useSound } from '../utils/useSound';
 
-const { playError } = useSound();
+const { playError, playSuccess } = useSound();
 
 const props = defineProps<{
   initialTiles: string[];
@@ -49,28 +49,41 @@ const unselectTile = (tile: { id: number; text: string }) => {
   }
 };
 
+// 👈 輔助函數：將陣列字磚轉為乾淨字串進行比對
+const getCleanText = (tiles: { text: string }[]) => {
+  return tiles.map(t => t.text.replace(/[\[\]]/g, '')).join(' ');
+};
+
 const checkAnswer = () => {
-  const tileTexts = answerArea.value.map(t => t.text);
+  // 1. 剝除中括號，取得乾淨的 tokens 給語法引擎
+  const cleanTokens = answerArea.value.map(t => t.text.replace(/[\[\]]/g, ''));
 
-  // 1. 執行語法檢查
-  signals.value = validatePostModifier(tileTexts, props.antecedent, { mode: props.mode });
+  // 2. 執行語法檢查
+  signals.value = validatePostModifier(cleanTokens, props.antecedent, { mode: props.mode });
 
-  // 2. 如果有任何語法迷思，立刻發送事件並中斷
   if (signals.value.length > 0) {
     playError();
-    signals.value.forEach(s => {
-      console.log('🔥 MicroTile 發送迷思事件:', s.code); // 👈 加這裡確認有無觸發
-      emit('misconception', s.code);
-    });
+    signals.value.forEach(s => emit('misconception', s.code));
     return;
   }
 
-  // 3. 檢查字序是否正確
-  const isOrderCorrect = tileTexts.join(' ') === props.correctAnswer.join(' ');
+  // 3. 檢查字序 (比對時也剝除中括號)
+  const currentAnswerStr = getCleanText(answerArea.value);
+  const correctAnswerStr = props.correctAnswer.map(t => t.replace(/[\[\]]/g, '')).join(' ');
 
-  if (isOrderCorrect) {
+  if (currentAnswerStr === correctAnswerStr) {
+    playSuccess();
     isSuccess.value = true;
-    setTimeout(() => emit('success'), 1000);
+
+    // 👈 新增：答對時自動觸發 TTS 朗讀整句
+    if ('speechSynthesis' in window) {
+      const utterance = new SpeechSynthesisUtterance(currentAnswerStr);
+      utterance.lang = 'en-US';
+      utterance.rate = 0.9;
+      window.speechSynthesis.speak(utterance);
+    }
+
+    setTimeout(() => emit('success'), 1500);
   } else {
     playError();
     emit('misconception', 'WRONG_ORDER');
@@ -83,7 +96,7 @@ watch(
   answerArea,
   (newVal) => {
     if (props.mode === 'reduce') return;
-    // 只要字數大於等於正確答案，就進行檢查
+    // 只要字數大於等於正確答案（扣除 chunk 後），就進行檢查
     if (newVal.length >= props.correctAnswer.length) {
       checkAnswer();
     }
@@ -100,16 +113,19 @@ const canCheck = computed(() => answerArea.value.length > 0);
     <div class="cloze-context" v-if="props.contextCloze">
       <span class="cloze-text">{{ props.contextCloze.prefix }}</span>
       <span class="cloze-blank">
-        {{answerArea.length > 0 ? answerArea.map(t => t.text).join(' ') : '________'}}
+        {{answerArea.length > 0 ? answerArea.map(t => t.text.replace(/[\[\]]/g, '')).join(' ') : '________'}}
       </span>
       <span class="cloze-text">{{ props.contextCloze.suffix }}</span>
     </div>
 
     <div data-test="answer-area" class="answer-area" :class="{ 'success-bg': isSuccess, 'shake': isWrong }">
-      <div v-for="(tile, index) in answerArea" :key="tile.id" data-test="tile" class="tile"
-        :class="{ 'tile-error': isError(index), 'tile-success': isSuccess, 'tile-wrong': isWrong }"
-        @click="unselectTile(tile)">
-        {{ tile.text }}
+      <div v-for="(tile, index) in answerArea" :key="tile.id" data-test="tile" class="tile" :class="{
+        'tile-error': isError(index),
+        'tile-success': isSuccess,
+        'tile-wrong': isWrong,
+        'tile-chunk': tile.text.startsWith('[') // 👈 加上片語塊專屬樣式
+      }" @click="unselectTile(tile)">
+        {{ tile.text.replace(/[\[\]]/g, '') }}
       </div>
     </div>
 
@@ -126,8 +142,9 @@ const canCheck = computed(() => answerArea.value.length > 0);
     </div>
 
     <div data-test="word-bank" class="word-bank">
-      <div v-for="tile in wordBank" :key="tile.id" data-test="tile" class="tile" @click="selectTile(tile)">
-        {{ tile.text }}
+      <div v-for="tile in wordBank" :key="tile.id" data-test="tile" class="tile"
+        :class="{ 'tile-chunk': tile.text.startsWith('[') }" @click="selectTile(tile)">
+        {{ tile.text.replace(/[\[\]]/g, '') }}
       </div>
     </div>
 
@@ -140,7 +157,7 @@ const canCheck = computed(() => answerArea.value.length > 0);
 </template>
 
 <style scoped>
-/* 樣式保持不變 */
+/* 原有樣式保留，新增 tile-chunk */
 .micro-tile-game {
   display: flex;
   flex-direction: column;
@@ -197,22 +214,32 @@ const canCheck = computed(() => answerArea.value.length > 0);
   transform: translateY(2px);
 }
 
+/* 👈 片語塊的專屬樣式：藍底、稍微圓潤 */
+.tile-chunk {
+  background-color: #e6f7ff;
+  border-color: #1cb0f6;
+  color: #1899d6;
+  border-radius: 20px;
+  padding: 12px 24px;
+  box-shadow: 0 2px 8px rgba(28, 176, 246, 0.15);
+}
+
 .tile-error {
-  background-color: #ffdfe0;
-  border-color: #ff4b4b;
-  color: #ea2b2b;
+  background-color: #ffdfe0 !important;
+  border-color: #ff4b4b !important;
+  color: #ea2b2b !important;
 }
 
 .tile-success {
-  background-color: #d7ffb8;
-  border-color: #58cc02;
-  color: #58cc02;
+  background-color: #d7ffb8 !important;
+  border-color: #58cc02 !important;
+  color: #58cc02 !important;
 }
 
 .tile-wrong {
-  background-color: #fff3e0;
-  border-color: #ff9800;
-  color: #e65100;
+  background-color: #fff3e0 !important;
+  border-color: #ff9800 !important;
+  color: #e65100 !important;
 }
 
 .alert-bubble {

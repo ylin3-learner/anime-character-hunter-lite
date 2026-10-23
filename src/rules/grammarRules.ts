@@ -5,11 +5,14 @@ const RELATIVE_PRONOUNS = new Set(['who', 'which', 'that']);
 const SUBJECT_PRONOUNS = new Set(['i', 'you', 'he', 'she', 'it', 'we', 'they']);
 const BE_VERBS = new Set(['is', 'are', 'was', 'were', 'am']);
 
+// 輔助函數：清除片語塊的中括號，讓語法引擎能正確讀取
+const cleanToken = (text: string) => text.replace(/[\[\]]/g, '').toLowerCase();
+
 export function assertNoDuplicatePronoun(tiles: string[]): DiagnosticSignal[] {
   const signals: DiagnosticSignal[] = [];
   for (let i = 0; i < tiles.length - 1; i++) {
-    const cur  = tiles[i].toLowerCase();
-    const next = tiles[i + 1].toLowerCase();
+    const cur = cleanToken(tiles[i]);
+    const next = cleanToken(tiles[i + 1]);
     if (RELATIVE_PRONOUNS.has(cur) && SUBJECT_PRONOUNS.has(next)) {
       signals.push({
         code: 'DUPLICATE_PRONOUN',
@@ -25,16 +28,16 @@ export function assertNoDuplicatePronoun(tiles: string[]): DiagnosticSignal[] {
 export function assertSVAgreement(tiles: string[], antecedent: Antecedent): DiagnosticSignal[] {
   const signals: DiagnosticSignal[] = [];
   for (let i = 0; i < tiles.length - 1; i++) {
-    const cur = tiles[i].toLowerCase();
+    const cur = cleanToken(tiles[i]);
     if (!RELATIVE_PRONOUNS.has(cur)) continue;
 
     let j = i + 1;
-    while (j < tiles.length && SUBJECT_PRONOUNS.has(tiles[j].toLowerCase())) {
+    while (j < tiles.length && SUBJECT_PRONOUNS.has(cleanToken(tiles[j]))) {
       j++;
     }
     if (j >= tiles.length) continue;
 
-    const verb = tiles[j].toLowerCase();
+    const verb = cleanToken(tiles[j]);
     const pair = findVerbPair(verb);
     if (!pair) continue;
 
@@ -54,7 +57,7 @@ export function assertSVAgreement(tiles: string[], antecedent: Antecedent): Diag
 export function assertRelativeChoice(tiles: string[], antecedent: Antecedent): DiagnosticSignal[] {
   const signals: DiagnosticSignal[] = [];
   tiles.forEach((tile, i) => {
-    const t = tile.toLowerCase();
+    const t = cleanToken(tile);
     if (t === 'who' && antecedent.person === 'thing') {
       signals.push({
         code: 'WRONG_RELATIVE',
@@ -75,7 +78,7 @@ export function assertRelativeChoice(tiles: string[], antecedent: Antecedent): D
 }
 
 export function assertReduced(tiles: string[]): DiagnosticSignal[] {
-  const idx = tiles.findIndex(t => RELATIVE_PRONOUNS.has(t.toLowerCase()));
+  const idx = tiles.findIndex(t => RELATIVE_PRONOUNS.has(cleanToken(t)));
   if (idx === -1) return [];
   return [
     {
@@ -87,25 +90,20 @@ export function assertReduced(tiles: string[]): DiagnosticSignal[] {
   ];
 }
 
-// 抓出「關代拿掉了、be 動詞卻還留在修飾語前面」。
-// 只在 be 動詞「緊接介系詞」時才判定為殘留：
-//   The ball is under the chair is dirty  → 第一個 is 後面接 under → 殘留
-//   The ball under the chair is dirty     → is 後面接 dirty → 正解，不誤報
-//   My mom is the woman in a long skirt   → is 後面接 the → 正解，不誤報
 const PREPOSITIONS = new Set([
   'in', 'on', 'at', 'under', 'behind', 'with', 'by', 'next', 'across',
   'near', 'from', 'over', 'above', 'beside', 'between', 'inside', 'outside',
 ]);
 
 export function assertNoLeftoverBe(tiles: string[]): DiagnosticSignal[] {
-  const hasRelative = tiles.some(t => RELATIVE_PRONOUNS.has(t.toLowerCase()));
+  const hasRelative = tiles.some(t => RELATIVE_PRONOUNS.has(cleanToken(t)));
   if (hasRelative) return [];
 
   const beIndex = tiles.findIndex(
     (t, i) =>
-      BE_VERBS.has(t.toLowerCase()) &&
+      BE_VERBS.has(cleanToken(t)) &&
       i + 1 < tiles.length &&
-      PREPOSITIONS.has(tiles[i + 1].toLowerCase())
+      PREPOSITIONS.has(cleanToken(tiles[i + 1]))
   );
   if (beIndex === -1) return [];
 
@@ -129,7 +127,7 @@ export function validatePostModifier(
   options: ValidateOptions = {}
 ): DiagnosticSignal[] {
   if (tiles.length === 0) return [];
-  
+
   if (options.mode === 'reduce') {
     const notReduced = assertReduced(tiles);
     if (notReduced.length > 0) return notReduced;

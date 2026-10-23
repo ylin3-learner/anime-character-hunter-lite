@@ -2,13 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { validatePostModifier } from '../src/rules/grammarRules';
 import type { Antecedent } from '../src/rules/types';
 
-const boy:    Antecedent = { noun: 'boy',    number: 'singular', person: 'person' };
-const girls:  Antecedent = { noun: 'girls',  number: 'plural',   person: 'person' };
-const pin:    Antecedent = { noun: 'pin',    number: 'singular', person: 'thing'  };
-const church: Antecedent = { noun: 'church', number: 'singular', person: 'thing'  };
-const people: Antecedent = { noun: 'people', number: 'plural',   person: 'person' };
-const line:   Antecedent = { noun: 'line',   number: 'singular', person: 'thing'  };
-const ball:   Antecedent = { noun: 'ball',   number: 'singular', person: 'thing'  };
+const boy: Antecedent = { noun: 'boy', number: 'singular', person: 'person' };
+const girls: Antecedent = { noun: 'girls', number: 'plural', person: 'person' };
+const pin: Antecedent = { noun: 'pin', number: 'singular', person: 'thing' };
+const church: Antecedent = { noun: 'church', number: 'singular', person: 'thing' };
+const people: Antecedent = { noun: 'people', number: 'plural', person: 'person' };
+const line: Antecedent = { noun: 'line', number: 'singular', person: 'thing' };
+const ball: Antecedent = { noun: 'ball', number: 'singular', person: 'thing' };
 
 const codes = (r: { code: string }[]) => r.map(s => s.code);
 const t = (s: string) => s.split(' ');
@@ -107,5 +107,26 @@ describe('reduce 模式：殘留 be 動詞', () => {
   it('仍有關代時優先回報 NOT_REDUCED，不夾帶 INCOMPLETE_REDUCTION', () => {
     expect(codes(validatePostModifier(t('The ball that is under the chair is dirty'), ball, { mode: 'reduce' })))
       .toEqual(['NOT_REDUCED']);
+  });
+});
+
+// 👈 新增：片語塊 (Chunking) 測試
+describe('片語塊 (Chunking) 測試', () => {
+  it('包含片語塊的正確句子不應報錯', () => {
+    // 模擬傳入帶中括號的 Token
+    const chunkedTiles = ['The', 'boy', 'who', 'is', '[looking up words]', 'is', 'Peter'];
+    expect(validatePostModifier(chunkedTiles, boy)).toEqual([]);
+  });
+
+  it('片語塊內含關鍵字不應觸發誤判', () => {
+    // 假設片語塊內有 who，但語法引擎不應把它當成關係代名詞，因為它在 [] 內
+    const chunkedTiles = ['The', 'boy', '[who is wearing a blue uniform]', 'is', 'Peter'];
+    // 由於 cleanToken 會拔掉中括號，但不會拆開裡面的字，所以 findVerbPair 找不到對應動詞，應跳過
+    expect(validatePostModifier(chunkedTiles, boy)).toEqual([]);
+  });
+
+  it('reduce 模式遇到片語塊正解不誤報', () => {
+    const chunkedTiles = ['The', 'boy', '[in a blue uniform]', 'is', 'Peter'];
+    expect(validatePostModifier(chunkedTiles, boy, { mode: 'reduce' })).toEqual([]);
   });
 });
