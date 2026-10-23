@@ -236,9 +236,18 @@ const saveQuestion = () => {
     },
     inputData: {
       audioText: `${targetNoun.value} ${relativeSentence.value.replace(/[\[\]]/g, '')} is my favorite.`,
+      // 讓選項直接顯示這張圖代表的英文片語 (拔掉中括號讓畫面乾淨)
       options: [
-        { image: imageUrl.value, text: '符合描述的角色', isCorrect: true },
-        { image: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Wrong', text: '不符合描述的角色', isCorrect: false }
+        { 
+          image: imageUrl.value, 
+          text: relativeSentence.value.replace(/[\[\]]/g, ''), // 例如: who is looking up words
+          isCorrect: true 
+        },
+        { 
+          image: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Wrong', 
+          text: 'who is wearing a blue uniform', // 老師可以在後台設定干擾圖片的特徵
+          isCorrect: false 
+        }
       ]
     },
     noticingData: {

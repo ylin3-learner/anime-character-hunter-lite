@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import { useTTS } from '../utils/useSpeech';
 
 const props = defineProps<{
@@ -12,39 +13,71 @@ const emit = defineEmits<{
 
 const { speak } = useTTS();
 
-const handleSelect = (isCorrect: boolean, index: number) => {
-  if (isCorrect) {
+const showText = ref(false); // 控制是否顯示文字提示
+const selectedIndex = ref<number | null>(null); // 記錄點選的卡片
+const isWrong = ref(false);
+const isSuccess = ref(false);
+
+const playAudio = () => {
+  speak(props.audioText);
+};
+
+const handleSelect = (opt: { isCorrect: boolean }, index: number) => {
+  if (isSuccess.value) return; // 已經答對就不處理點擊
+
+  selectedIndex.value = index;
+
+  if (opt.isCorrect) {
+    isSuccess.value = true;
     // 答對了，稍微停頓後進入下一階段
     setTimeout(() => {
       emit('success');
-    }, 800);
+    }, 1000);
   } else {
-    // 答錯了，重新播放句子，並給予引導
+    // 答錯了，震動並重新播放句子
+    isWrong.value = true;
     speak(props.audioText);
-    alert('再聽一次！注意聽修飾語的部分，是哪一個女孩呢？');
+
+    setTimeout(() => {
+      isWrong.value = false;
+      selectedIndex.value = null;
+    }, 800);
   }
 };
 </script>
 
 <template>
   <div class="structured-input">
-    <h2 class="instruction">🎧 請聽句子，選出正確的圖片</h2>
-    
-    <button class="btn-play-audio" @click="speak(audioText)">
-      🔊 播放句子
-    </button>
+    <h2 class="instruction">🎧 請聽句子，選出符合描述的圖片</h2>
+
+    <div class="audio-controls">
+      <button @click="playAudio" class="btn-play">
+        🔊 播放句子
+      </button>
+      <button @click="showText = !showText" class="btn-toggle-text" :class="{ active: showText }">
+        {{ showText ? '🙈 隱藏文字' : '👀 顯示文字提示' }}
+      </button>
+    </div>
+
+    <!-- 文字輔助顯示區塊 -->
+    <Transition name="fade">
+      <div v-if="showText" class="transcript-hint">
+        <p>{{ audioText }}</p>
+      </div>
+    </Transition>
 
     <div class="options-grid">
-      <div 
-        v-for="(opt, index) in options" 
-        :key="index"
-        class="option-card"
-        @click="handleSelect(opt.isCorrect, index)"
-      >
-        <img :src="opt.image" alt="option" />
-        <p>{{ opt.text }}</p>
+      <div v-for="(opt, index) in options" :key="index" class="option-card" :class="{
+        'is-wrong': isWrong && selectedIndex === index,
+        'is-success': isSuccess && selectedIndex === index
+      }" @click="handleSelect(opt, index)">
+        <img :src="opt.image" :class="{ 'shake': isWrong && selectedIndex === index }" />
+        <!-- 顯示該圖片對應的英文特徵 -->
+        <p class="option-label">{{ opt.text }}</p>
       </div>
     </div>
+
+    <p v-if="isWrong" class="error-msg">順序不太對喔！再仔細聽一次句子。</p>
   </div>
 </template>
 
@@ -55,44 +88,85 @@ const handleSelect = (isCorrect: boolean, index: number) => {
   align-items: center;
   text-align: center;
   animation: fadeIn 0.5s ease;
+  width: 100%;
 }
 
 .instruction {
-  color: #777;
+  color: #555;
   font-size: 1.2rem;
+  margin-bottom: 24px;
+  font-weight: bold;
+}
+
+.audio-controls {
+  display: flex;
+  gap: 12px;
   margin-bottom: 24px;
 }
 
-.btn-play-audio {
+.btn-play {
   background: #e6f7ff;
   color: #1cb0f6;
   border: 2px solid #1cb0f6;
-  padding: 16px 32px;
+  padding: 12px 32px;
   border-radius: 16px;
-  font-size: 1.2rem;
+  font-size: 1.1rem;
   font-weight: bold;
   cursor: pointer;
-  margin-bottom: 40px;
   transition: all 0.2s;
 }
-.btn-play-audio:hover { background: #1cb0f6; color: white; }
+
+.btn-play:hover {
+  background: #1cb0f6;
+  color: white;
+}
+
+.btn-toggle-text {
+  background: #f9f9f9;
+  color: #777;
+  border: 2px solid #e5e5e5;
+  padding: 12px 24px;
+  border-radius: 16px;
+  font-size: 1rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-toggle-text:hover,
+.btn-toggle-text.active {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.transcript-hint {
+  background: #fff8e1;
+  border: 2px dashed #ffc107;
+  padding: 12px 24px;
+  border-radius: 12px;
+  margin-bottom: 24px;
+  color: #d84315;
+  font-size: 1.2rem;
+  font-weight: bold;
+}
 
 .options-grid {
   display: flex;
-  gap: 20px;
+  gap: 24px;
   justify-content: center;
   width: 100%;
+  margin-bottom: 24px;
 }
 
 .option-card {
   background: white;
   border: 3px solid #e5e5e5;
   border-radius: 20px;
-  padding: 20px;
-  width: 200px;
+  padding: 24px;
+  width: 220px;
   cursor: pointer;
   transition: all 0.2s;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
 .option-card:hover {
@@ -100,22 +174,102 @@ const handleSelect = (isCorrect: boolean, index: number) => {
   transform: translateY(-4px);
 }
 
-.option-card img {
-  width: 100px;
-  height: 100px;
-  border-radius: 50%;
-  object-fit: cover;
-  margin-bottom: 12px;
+.option-card.is-wrong {
+  border-color: #ff4b4b;
+  background: #fff0f0;
 }
 
-.option-card p {
+.option-card.is-success {
+  border-color: #58cc02;
+  background: #f0fff0;
+  box-shadow: 0 0 16px rgba(88, 204, 2, 0.3);
+}
+
+.option-card img {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  object-fit: cover;
+  margin-bottom: 16px;
+  background: #f0f0f0;
+}
+
+.option-label {
   font-weight: bold;
   color: #333;
   margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.4;
+  word-break: break-word;
 }
 
+.error-msg {
+  color: #ff4b4b;
+  font-weight: bold;
+  animation: slideDown 0.3s;
+}
+
+/* 動畫 */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideDown {
+  from {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.shake {
+  animation: shake 0.4s cubic-bezier(.36, .07, .19, .97) both;
+}
+
+@keyframes shake {
+
+  10%,
+  90% {
+    transform: translate3d(-2px, 0, 0);
+  }
+
+  20%,
+  80% {
+    transform: translate3d(4px, 0, 0);
+  }
+
+  30%,
+  50%,
+  70% {
+    transform: translate3d(-8px, 0, 0);
+  }
+
+  40%,
+  60% {
+    transform: translate3d(8px, 0, 0);
+  }
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
 }
 </style>
