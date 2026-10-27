@@ -7,7 +7,7 @@ const props = defineProps<{
     noun: string;
     chunk: string;
     zhMeaning: string;
-    quizOptions?: { text: string; isCorrect: boolean }[]; // 👈 改為選填
+    quizOptions?: { text: string; isCorrect: boolean }[];
 }>();
 
 const emit = defineEmits<{
@@ -20,6 +20,11 @@ const cleanChunk = props.chunk.replace(/[\[\]]/g, '');
 const selectedIndex = ref<number | null>(null);
 const isWrong = ref(false);
 const isSuccess = ref(false);
+
+// 👈 過濾掉系統預設的假圖
+const isRealImage = computed(() => {
+    return props.image && !props.image.includes('dicebear.com');
+});
 
 const playChunkAudio = () => {
     speak(cleanChunk);
@@ -52,7 +57,10 @@ const handleSelect = (opt: { text: string; isCorrect: boolean }, index: number) 
         <p class="instruction" v-else>請點擊片語聽發音，並記住它的意思！</p>
 
         <div class="character-card">
-            <img :src="image" alt="character" class="preview-img" />
+            <!-- 👈 使用 isRealImage 判斷 -->
+            <img v-if="isRealImage" :src="image" alt="character" class="preview-img" />
+            <div v-else class="preview-img placeholder-img">無圖片</div>
+
             <div class="text-area">
                 <div class="noun-text">{{ noun }}</div>
 
@@ -64,7 +72,6 @@ const handleSelect = (opt: { text: string; isCorrect: boolean }, index: number) 
             </div>
         </div>
 
-        <!-- 如果有設定 quizOptions 則顯示測驗按鈕，否則顯示原本的繼續按鈕 -->
         <div v-if="quizOptions && quizOptions.length > 0" class="quiz-options">
             <button v-for="(opt, index) in quizOptions" :key="index" class="quiz-btn" :class="{
                 'is-wrong': isWrong && selectedIndex === index,
@@ -120,6 +127,17 @@ h2 {
     margin-bottom: 20px;
     background: #f0f0f0;
     border: 4px solid #1cb0f6;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.placeholder-img {
+    background: #e5e5e5;
+    color: #999;
+    font-weight: bold;
+    font-size: 1.2rem;
+    border-color: #ccc;
 }
 
 .text-area {

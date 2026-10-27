@@ -18,6 +18,11 @@ const selectedIndex = ref<number | null>(null);
 const isWrong = ref(false);
 const isSuccess = ref(false);
 
+// 👈 過濾假圖的輔助函數
+const isRealImage = (url: string) => {
+  return url && !url.includes('dicebear.com');
+};
+
 const playAudio = () => {
   speak(props.audioText);
 };
@@ -62,8 +67,10 @@ const handleSelect = (opt: { isCorrect: boolean }, index: number) => {
         'is-wrong': isWrong && selectedIndex === index,
         'is-success': isSuccess && selectedIndex === index
       }" @click="handleSelect(opt, index)">
-        <img :src="opt.image" :class="{ 'shake': isWrong && selectedIndex === index }" />
-        <!-- 如果有填寫文字才顯示 -->
+        <!-- 👈 使用 isRealImage 判斷 -->
+        <img v-if="isRealImage(opt.image)" :src="opt.image" :class="{ 'shake': isWrong && selectedIndex === index }" />
+        <div v-else class="placeholder-img" :class="{ 'shake': isWrong && selectedIndex === index }">無圖片</div>
+
         <p v-if="opt.text" class="option-label">{{ opt.text }}</p>
       </div>
     </div>
@@ -73,7 +80,6 @@ const handleSelect = (opt: { isCorrect: boolean }, index: number) => {
 </template>
 
 <style scoped>
-/* 樣式保持不變，請直接複製貼上 */
 .structured-input {
   display: flex;
   flex-direction: column;
@@ -188,6 +194,21 @@ const handleSelect = (opt: { isCorrect: boolean }, index: number) => {
   object-fit: cover;
   margin-bottom: 16px;
   background: #f0f0f0;
+}
+
+.placeholder-img {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: #e5e5e5;
+  color: #999;
+  font-weight: bold;
+  font-size: 1rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 16px;
+  border: 2px dashed #ccc;
 }
 
 .option-label {
