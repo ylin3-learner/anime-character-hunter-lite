@@ -16,7 +16,6 @@ const props = defineProps<{
   layout?: 'modifier-left' | 'modifier-right';
   explanationTitle?: string;
   explanationDesc?: string;
-  // 👈 移除 reducedSentence
 }>();
 
 const emit = defineEmits<{
@@ -132,6 +131,17 @@ const continueToNext = () => {
   showExplanation.value = false;
   emit('success');
 };
+
+// 👈 自動解析 Markdown 語法
+const formattedDesc = computed(() => {
+  if (!props.explanationDesc) return '';
+  let text = props.explanationDesc;
+  // 將 **文字** 轉為粗體
+  text = text.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+  // 將 ==文字== 轉為高亮
+  text = text.replace(/==(.*?)==/g, '<span class="hl">$1</span>');
+  return text;
+});
 </script>
 
 <template>
@@ -181,7 +191,8 @@ const continueToNext = () => {
       <Transition name="pop-up">
         <div v-if="showExplanation" class="explanation-card">
           <h3 v-if="explanationTitle">{{ explanationTitle }}</h3>
-          <p v-if="explanationDesc" class="explanation-text">{{ explanationDesc }}</p>
+          <!-- 使用 formattedDesc 與 v-html -->
+          <p v-if="explanationDesc" class="explanation-text" v-html="formattedDesc"></p>
 
           <div class="english-sentence">
             <span class="noun-text">{{ englishNoun }}</span>
@@ -191,7 +202,6 @@ const continueToNext = () => {
           <p class="compare-text">對比中文：<span class="highlight-red">{{ chineseHighlight }}</span>{{
             chineseSentence.replace(chineseHighlight, '') }}</p>
 
-          <!-- 👈 移除了簡化按鈕，直接讓學生繼續 -->
           <button class="btn-continue" @click="continueToNext">我懂了，繼續 ➔</button>
         </div>
       </Transition>
@@ -200,7 +210,6 @@ const continueToNext = () => {
 </template>
 
 <style scoped>
-/* 樣式沿用你原本的，已移除 reduced-mode 相關特效 */
 .contrast-puzzle {
   display: flex;
   flex-direction: column;
@@ -369,10 +378,27 @@ const continueToNext = () => {
   margin-bottom: 12px;
 }
 
+/* 👈 方案一：極簡低調風（減少色彩干擾） */
 .explanation-text {
   color: #555;
   font-size: 1.1rem;
   margin-bottom: 16px;
+  line-height: 1.6;
+}
+
+/* 加粗樣式：保留原本的文字顏色，只加粗 */
+.explanation-text :deep(b) {
+  color: #333;
+  font-weight: 800;
+}
+
+/* 高亮樣式：淺灰底、黑字 */
+.explanation-text :deep(.hl) {
+  background-color: #f0f0f0;
+  color: #333;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 6px;
 }
 
 .english-sentence {
