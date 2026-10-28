@@ -12,7 +12,9 @@ export interface QuestionData {
   antecedent: Antecedent;
   imageUrl: string;
   tags?: string[];
-  speechRate?: number; // 👈 新增語速欄位
+  speechRate?: number;
+  isTimed?: boolean;    // 新增
+  timeLimit?: number;   // 新增
   grammarFeature: {
     relative: { label: string; tiles: string[]; correctAnswer: string[]; distractors?: string[] };
     preposition: { label: string; tiles: string[]; correctAnswer: string[] };
