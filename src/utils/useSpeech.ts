@@ -4,6 +4,14 @@ let isTTSUnlocked = false;
 let globalVoices: SpeechSynthesisVoice[] = [];
 let currentAudio: HTMLAudioElement | null = null;
 
+// 👈 定義微軟 Edge TTS 的高品質語音池
+const edgeVoices = [
+  'en-US-AriaNeural',      // 女聲，活潑
+  'en-US-GuyNeural',       // 男聲，沉穩
+  'en-US-JennyNeural',     // 女聲，溫柔
+  'en-US-ChristopherNeural'// 男聲，成熟
+];
+
 const loadVoices = () => {
   if ('speechSynthesis' in window) {
     globalVoices = window.speechSynthesis.getVoices();
@@ -30,17 +38,20 @@ export function useTTS() {
 
   const speak = async (text: string, options?: { rate?: number }) => {
     const rate = options?.rate ?? 0.8;
-    const hasSystemVoices = 'speechSynthesis' in window && globalVoices.length > 0;
+    
+    // 抓取系統所有的英文語音包
+    const enVoices = globalVoices.filter(v => v.lang.toLowerCase().includes('en'));
 
-    if (hasSystemVoices) {
+    if (enVoices.length > 0) {
       // 👈 情況 A：學生平板（有原生語音包）
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'en-US';
       utterance.rate = rate;
       
-      const enVoice = globalVoices.find(v => v.lang.toLowerCase().includes('en'));
-      if (enVoice) utterance.voice = enVoice;
+      // 👈 隨機挑選一個系統的英文語音包
+      const randomVoice = enVoices[Math.floor(Math.random() * enVoices.length)];
+      utterance.voice = randomVoice;
       
       utterance.onstart = () => { isSpeaking.value = true; };
       utterance.onend = () => { isSpeaking.value = false; };
@@ -51,17 +62,20 @@ export function useTTS() {
       isSpeaking.value = true;
       
       try {
-        // 自動抓取環境變數中的 Supabase URL
         const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        
+        // 👈 隨機挑選一個微軟 Edge 語音包
+        const randomEdgeVoice = edgeVoices[Math.floor(Math.random() * edgeVoices.length)];
+        console.log(`🎲 隨機使用 Edge 語音: ${randomEdgeVoice}`);
         
         const res = await fetch(`${supabaseUrl}/functions/v1/edge-tts`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            // 若你的 Edge Function 有開啟 JWT 驗證，這裡需要加上 apikey 標頭
-            // 'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
-          },
-          body: JSON.stringify({ text, rate: rate.toString() })
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            text, 
+            rate: rate.toString(),
+            voice: randomEdgeVoice // 👈 把選中的語音傳給後端
+          })
         });
 
         const data = await res.json();
