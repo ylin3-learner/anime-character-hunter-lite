@@ -1,5 +1,18 @@
 import { ref } from 'vue';
 
+let isTTSUnlocked = false;
+
+// 👈 新增：解鎖 Web Speech API (TTS)
+export const unlockTTS = () => {
+  if (isTTSUnlocked || !('speechSynthesis' in window)) return;
+  // 播放一個空白字元來騙過 iOS
+  const utterance = new SpeechSynthesisUtterance(' ');
+  utterance.volume = 0;
+  window.speechSynthesis.speak(utterance);
+  isTTSUnlocked = true;
+  console.log('🔓 Web Speech API unlocked');
+};
+
 // ── 1. TTS 文字轉語音 ──
 export function useTTS() {
   const isSpeaking = ref(false);
@@ -9,7 +22,7 @@ export function useTTS() {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'en-US';
-      utterance.rate = options?.rate ?? 0.8; 
+      utterance.rate = options?.rate ?? 0.8;
       utterance.pitch = options?.pitch ?? 1;
       utterance.onstart = () => { isSpeaking.value = true; };
       utterance.onend = () => { isSpeaking.value = false; };
@@ -31,7 +44,7 @@ export function useSpeechRecognition() {
   let recognition: any = null;
 
   const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-  
+
   if (SpeechRecognition) {
     isSupported.value = true;
     recognition = new SpeechRecognition();
@@ -57,17 +70,14 @@ export function useSpeechRecognition() {
         transcript.value = resultText;
         isListening.value = false;
 
-        // 更嚴謹的比對：去標點、轉小寫、分詞比對
         const cleanTarget = targetText.toLowerCase().replace(/[.,?!|]/g, '').split(/\s+/).filter(Boolean);
         const cleanResult = resultText.toLowerCase().replace(/[.,?!|]/g, '').split(/\s+/).filter(Boolean);
-        
-        // 計算目標詞彙被辨識出的比例
+
         let matchCount = 0;
         cleanTarget.forEach((word: string) => {
           if (cleanResult.includes(word)) matchCount++;
         });
-        
-        // 如果命中率超過 70%，就視為通過
+
         const match = (matchCount / cleanTarget.length) >= 0.7;
         resolve({ match, text: resultText });
       };

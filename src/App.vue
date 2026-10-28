@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import MacroDragCanvas from './components/MacroDragCanvas.vue';
 import MicroTileUnscramble from './components/MicroTileUnscramble.vue';
 import TeacherAdmin from './components/TeacherAdmin.vue';
@@ -13,7 +13,8 @@ import ChunkPreview from './components/ChunkPreview.vue';
 
 import { defaultQuestions } from './data/questions';
 import type { QuestionData } from './rules/types';
-import { useSound } from './utils/useSound';
+import { useSound, unlockAudioContext } from './utils/useSound'; // 👈 引入解鎖函數
+import { unlockTTS } from './utils/useSpeech'; // 👈 引入解鎖函數
 import { CloudDatabase } from './services/CloudDatabase';
 
 const showAdmin = ref(false);
@@ -32,7 +33,21 @@ const sessionLog = ref<string[]>([]);
 const showSummary = ref(false);
 const completedCount = ref(0);
 
+// 👈 全域解鎖處理器
+const handleGlobalInteraction = () => {
+  unlockAudioContext();
+  unlockTTS();
+  // 解鎖後即可移除監聽
+  document.removeEventListener('pointerdown', handleGlobalInteraction);
+  document.removeEventListener('touchstart', handleGlobalInteraction);
+};
+
 onMounted(async () => {
+  // 綁定解鎖事件
+  document.addEventListener('pointerdown', handleGlobalInteraction);
+  document.addEventListener('touchstart', handleGlobalInteraction);
+
+  // 載入題庫
   const cloudQuestions = await CloudDatabase.fetchQuestions();
   if (cloudQuestions && cloudQuestions.length > 0) {
     questionBank.value = cloudQuestions;
@@ -47,6 +62,11 @@ onMounted(async () => {
   }
   fixAntecedentNumbers();
   checkAndSetInitialStage();
+});
+
+onUnmounted(() => {
+  document.removeEventListener('pointerdown', handleGlobalInteraction);
+  document.removeEventListener('touchstart', handleGlobalInteraction);
 });
 
 const fixAntecedentNumbers = () => {
@@ -145,7 +165,6 @@ const cancelAuth = () => { showAdminAuth.value = false; adminPasswordInput.value
       <div v-else-if="currentStage === 'success'" class="success-screen">
         <div class="confetti">🎉 ✨ 🏆</div>
         <h2>角色解鎖成功！</h2>
-        <!-- 👈 傳入 speechRate -->
         <PronunciationAnalyzer v-if="getEnabledStages.includes('pronunciation')"
           :targetSentence="fullSentenceData.target" :displaySentence="fullSentenceData.display"
           :highlightPart="fullSentenceData.modifier" :speechRate="currentQuestion.speechRate || 0.8"
@@ -167,7 +186,6 @@ const cancelAuth = () => { showAdminAuth.value = false; adminPasswordInput.value
           @misconception="handleMisconception" />
       </div>
 
-      <!-- 👈 傳入 speechRate -->
       <div v-else-if="currentStage === 'preview' && currentQuestion.previewData" class="stage-content">
         <ChunkPreview :image="currentQuestion.previewData.targetImage" :noun="currentQuestion.previewData.targetNoun"
           :chunk="currentQuestion.previewData.chunkText" :zhMeaning="currentQuestion.previewData.chunkZh"
@@ -175,7 +193,6 @@ const cancelAuth = () => { showAdminAuth.value = false; adminPasswordInput.value
           @success="handlePreviewSuccess" />
       </div>
 
-      <!-- 👈 傳入 speechRate -->
       <div v-else-if="currentStage === 'input' && currentQuestion.inputData" class="stage-content">
         <StructuredInput :audioText="currentQuestion.inputData.audioText" :options="currentQuestion.inputData.options"
           :speechRate="currentQuestion.speechRate || 0.8" @success="handleInputSuccess" />
@@ -188,7 +205,6 @@ const cancelAuth = () => { showAdminAuth.value = false; adminPasswordInput.value
           :imageUrl="currentQuestion.imageUrl" @unpack="handleUnpack" />
       </div>
 
-      <!-- 👈 傳入 speechRate -->
       <div v-else-if="currentStage === 'micro'" class="stage-content">
         <h2 class="instruction">圖塊已解鎖！請排列出正確的字序。</h2>
         <div class="target-noun"><span class="highlight">{{ currentQuestion.targetNoun }}</span></div>
