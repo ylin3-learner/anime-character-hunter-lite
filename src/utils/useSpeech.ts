@@ -2,83 +2,95 @@ import { ref } from 'vue';
 
 let isTTSUnlocked = false;
 let globalVoices: SpeechSynthesisVoice[] = [];
+let currentAudio: HTMLAudioElement | null = null;
 
-// 👈 新增：載入並監聽語音包
 const loadVoices = () => {
   if ('speechSynthesis' in window) {
     globalVoices = window.speechSynthesis.getVoices();
-    if (globalVoices.length > 0) {
-      console.log(`✅ TTS 語音包已載入，共 ${globalVoices.length} 個`);
-    }
   }
 };
 
-// 初始化時立刻嘗試載入，並綁定變化事件（解決非同步載入問題）
 if ('speechSynthesis' in window) {
   loadVoices();
   window.speechSynthesis.onvoiceschanged = loadVoices;
 }
 
 export const unlockTTS = () => {
-  if (isTTSUnlocked || !('speechSynthesis' in window)) return;
-  const utterance = new SpeechSynthesisUtterance(' ');
-  utterance.volume = 0;
-  window.speechSynthesis.speak(utterance);
+  if (isTTSUnlocked) return;
+  if ('speechSynthesis' in window) {
+    const utterance = new SpeechSynthesisUtterance(' ');
+    utterance.volume = 0;
+    window.speechSynthesis.speak(utterance);
+  }
   isTTSUnlocked = true;
 };
 
 export function useTTS() {
   const isSpeaking = ref(false);
-  
-  const speak = (text: string, options?: { rate?: number; pitch?: number }) => {
-    if (!('speechSynthesis' in window)) {
-      console.warn('❌ 此瀏覽器不支援 TTS');
-      return;
-    }
 
-    window.speechSynthesis.cancel();
+  const speak = async (text: string, options?: { rate?: number }) => {
+    const rate = options?.rate ?? 0.8;
+    const hasSystemVoices = 'speechSynthesis' in window && globalVoices.length > 0;
 
-    // 如果陣列是空的，再抓一次
-    if (globalVoices.length === 0) loadVoices();
-
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'en-US';
-    utterance.rate = options?.rate ?? 0.8;
-    utterance.pitch = options?.pitch ?? 1;
-
-    // 👈 核心修正：強制匹配英文語音包
-    // 如果系統預設是中文，不指定 voice 會導致靜音。
-    const enVoice = globalVoices.find(v => v.lang.toLowerCase().includes('en'));
-    if (enVoice) {
-      utterance.voice = enVoice;
+    if (hasSystemVoices) {
+      // 👈 情況 A：學生平板（有原生語音包）
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'en-US';
+      utterance.rate = rate;
+      
+      const enVoice = globalVoices.find(v => v.lang.toLowerCase().includes('en'));
+      if (enVoice) utterance.voice = enVoice;
+      
+      utterance.onstart = () => { isSpeaking.value = true; };
+      utterance.onend = () => { isSpeaking.value = false; };
+      window.speechSynthesis.speak(utterance);
     } else {
-      console.warn('⚠️ 找不到英文語音包，嘗試使用系統預設...');
+      // 👈 情況 B：智慧白板（無原生語音包，呼叫 Supabase）
+      console.log('⚠️ 系統無語音包，呼叫 Supabase Edge TTS...');
+      isSpeaking.value = true;
+      
+      try {
+        // 自動抓取環境變數中的 Supabase URL
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        
+        const res = await fetch(`${supabaseUrl}/functions/v1/edge-tts`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            // 若你的 Edge Function 有開啟 JWT 驗證，這裡需要加上 apikey 標頭
+            // 'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+          },
+          body: JSON.stringify({ text, rate: rate.toString() })
+        });
+
+        const data = await res.json();
+        
+        if (data.url) {
+          if (currentAudio) currentAudio.pause();
+          currentAudio = new Audio(data.url);
+          currentAudio.onended = () => { isSpeaking.value = false; };
+          currentAudio.onerror = () => { isSpeaking.value = false; console.error('音檔播放失敗'); };
+          await currentAudio.play();
+        } else {
+          throw new Error(data.error || '取得音檔失敗');
+        }
+      } catch (error) {
+        console.error('❌ Edge TTS 失敗:', error);
+        isSpeaking.value = false;
+      }
     }
-
-    utterance.onstart = () => { 
-      console.log('🔊 TTS 開始播放');
-      isSpeaking.value = true; 
-    };
-    utterance.onend = () => { 
-      isSpeaking.value = false; 
-    };
-    utterance.onerror = (e) => { 
-      console.error('🚨 TTS 發生錯誤:', e.error);
-      isSpeaking.value = false; 
-    };
-
-    window.speechSynthesis.speak(utterance);
   };
 
   return { speak, isSpeaking };
 }
 
+// 👈 保留原本的 STT 函數（目前 Sprint 1 先不用，但保留給 Sprint 2）
 export function useSpeechRecognition() {
   const isListening = ref(false);
   const transcript = ref('');
   const isSupported = ref(false);
   const error = ref('');
-
   let recognition: any = null;
   const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
@@ -96,7 +108,6 @@ export function useSpeechRecognition() {
         resolve({ match: false, text: '瀏覽器不支援' });
         return;
       }
-
       transcript.value = '';
       error.value = '';
       isListening.value = true;
@@ -105,15 +116,12 @@ export function useSpeechRecognition() {
         const resultText = event.results[0][0].transcript;
         transcript.value = resultText;
         isListening.value = false;
-
         const cleanTarget = targetText.toLowerCase().replace(/[.,?!|]/g, '').split(/\s+/).filter(Boolean);
         const cleanResult = resultText.toLowerCase().replace(/[.,?!|]/g, '').split(/\s+/).filter(Boolean);
-
         let matchCount = 0;
         cleanTarget.forEach((word: string) => {
           if (cleanResult.includes(word)) matchCount++;
         });
-
         const match = (matchCount / cleanTarget.length) >= 0.7;
         resolve({ match, text: resultText });
       };
