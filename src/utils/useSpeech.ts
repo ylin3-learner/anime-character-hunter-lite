@@ -4,9 +4,18 @@ let isTTSUnlocked = false;
 let globalVoices: SpeechSynthesisVoice[] = [];
 let currentAudio: HTMLAudioElement | null = null;
 
-const edgeVoices = [
-  'en-US-AriaNeural', 'en-US-GuyNeural', 'en-US-JennyNeural', 'en-US-ChristopherNeural'
+// 👈 定義公認高品質的語音包關鍵字 (跨平台：iOS, macOS, Windows, Chrome)
+const HIGH_QUALITY_VOICES = [
+  // Apple (iOS / macOS) - Siri 等級的高品質語音
+  'Samantha', 'Alex', 'Daniel', 'Karen', 'Moira', 'Tessa', 'Rishi',
+  // Google (Chrome) - Google 的神經網路語音
+  'Google US English', 'Google UK English',
+  // Microsoft (Edge / Windows 11 自然語音)
+  'Aria', 'Guy', 'Jenny', 'Christopher', 'Natural'
 ];
+
+// 用來過濾低品質、機械音的關鍵字 (例如舊版的 Zira, David 等)
+const BAD_VOICE_KEYWORDS = ['compact', 'robot', 'Zira', 'David', 'Mark'];
 
 const loadVoices = () => {
   if ('speechSynthesis' in window) {
@@ -34,29 +43,54 @@ export function useTTS() {
 
   const speak = async (text: string, options?: { rate?: number }) => {
     const rate = options?.rate ?? 0.8;
+    const forceEdge = window.location.search.includes('forceEdge=1');
+
+    // 1. 取得所有英文語音包
     const enVoices = globalVoices.filter(v => v.lang.toLowerCase().includes('en'));
 
-    if (enVoices.length > 0) {
-      console.log(`[TTS] 走本機原生語音 (可用語音數: ${enVoices.length})`);
+    // 2. 👈 過濾出「高品質」的語音包
+    let premiumVoices = enVoices.filter(voice => {
+      const name = voice.name;
+      // 必須符合白名單關鍵字，且不能包含黑名單的爛語音關鍵字
+      const isHighQuality = HIGH_QUALITY_VOICES.some(keyword => name.includes(keyword));
+      const isBadQuality = BAD_VOICE_KEYWORDS.some(keyword => name.includes(keyword));
+      return isHighQuality && !isBadQuality;
+    });
+
+    // 如果過濾後為空，就退而求其次用所有的英文語音包
+    if (premiumVoices.length === 0) {
+      premiumVoices = enVoices;
+    }
+
+    // 3. 判斷走原生還是強制走雲端 (除錯用)
+    if (premiumVoices.length > 0 && !forceEdge) {
+      // 👈 情況 A：走本機原生高品質語音 (平板/電腦)
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'en-US';
       utterance.rate = rate;
 
-      const randomVoice = enVoices[Math.floor(Math.random() * enVoices.length)];
+      // 隨機挑選一個高品質語音包
+      const randomVoice = premiumVoices[Math.floor(Math.random() * premiumVoices.length)];
       utterance.voice = randomVoice;
+
+      console.log(`[TTS] 使用原生高品質語音: ${randomVoice.name}`);
 
       utterance.onstart = () => { isSpeaking.value = true; };
       utterance.onend = () => { isSpeaking.value = false; };
       window.speechSynthesis.speak(utterance);
     } else {
-      console.log('[TTS] 無本機語音，呼叫 Supabase Edge TTS...');
+      // 情況 B：強制走 Edge/Azure TTS 代理 (測試用)
+      console.log('[TTS] 呼叫雲端 TTS 代理...');
       isSpeaking.value = true;
 
       try {
         const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        // 雲端代理的語音池 (直接指定微軟的高品質神經網路語音)
+        const edgeVoices = [
+          'en-US-AriaNeural', 'en-US-GuyNeural', 'en-US-JennyNeural', 'en-US-ChristopherNeural'
+        ];
         const randomEdgeVoice = edgeVoices[Math.floor(Math.random() * edgeVoices.length)];
-        console.log(`[TTS] 隨機語音: ${randomEdgeVoice}, 語速: ${rate}`);
 
         const res = await fetch(`${supabaseUrl}/functions/v1/edge-tts`, {
           method: 'POST',
@@ -78,12 +112,11 @@ export function useTTS() {
           currentAudio.onended = () => { isSpeaking.value = false; };
           currentAudio.onerror = () => { isSpeaking.value = false; console.error('[TTS] 音檔播放失敗'); };
           await currentAudio.play();
-          console.log('[TTS] 播放成功');
         } else {
           throw new Error(data.error || '取得音檔失敗 (無 URL)');
         }
       } catch (error: any) {
-        console.error(`[TTS] Edge TTS 失敗: ${error.message || error}`);
+        console.error(`[TTS] 雲端 TTS 失敗: ${error.message || error}`);
         isSpeaking.value = false;
       }
     }
@@ -92,9 +125,8 @@ export function useTTS() {
   return { speak, isSpeaking };
 }
 
-// useSpeechRecognition 保持不變
+// (保留原本的 useSpeechRecognition 邏輯)
 export function useSpeechRecognition() {
-  // ... (略，請保留你原本的程式碼)
   const isListening = ref(false);
   const transcript = ref('');
   const isSupported = ref(false);
