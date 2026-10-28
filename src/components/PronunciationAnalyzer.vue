@@ -6,17 +6,15 @@ const props = defineProps<{
   targetSentence: string;
   displaySentence: string;
   highlightPart: string;
+  speechRate?: number;
 }>();
 
-// 👇 新增 skip 事件
-const emit = defineEmits<{
-  (e: 'skip'): void;
-}>();
+const emit = defineEmits<{ (e: 'skip'): void; }>();
 
 const { isSupported, startListening } = useSpeechRecognition();
 const { speak } = useTTS();
 
-const playbackRate = ref(0.85);
+const playbackRate = ref(props.speechRate || 0.85);
 const hasRecording = ref(false);
 const transcript = ref('');
 const isMatch = ref(false);
@@ -27,13 +25,8 @@ const isAnalyzing = ref(false);
 let mediaRecorder: MediaRecorder | null = null;
 let audioChunks: Blob[] = [];
 
-const targetWords = computed(() => {
-  return props.targetSentence.replace(/\|/g, '').trim().split(/\s+/);
-});
-
-const resultWords = computed(() => {
-  return transcript.value.trim().split(/\s+/);
-});
+const targetWords = computed(() => props.targetSentence.replace(/\|/g, '').trim().split(/\s+/));
+const resultWords = computed(() => transcript.value.trim().split(/\s+/));
 
 const isWordMatched = (word: string) => {
   if (!transcript.value) return false;
@@ -45,7 +38,9 @@ const startRecording = async () => {
   try {
     if (window.speechSynthesis) window.speechSynthesis.cancel();
 
+    console.log('🎤 請求麥克風權限...');
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    console.log('✅ 麥克風權限已取得');
 
     let mimeType = 'audio/webm';
     if (!MediaRecorder.isTypeSupported('audio/webm') && MediaRecorder.isTypeSupported('audio/mp4')) {
@@ -68,19 +63,24 @@ const startRecording = async () => {
         hasRecording.value = true;
       }
 
-      setTimeout(async () => {
-        isAnalyzing.value = true;
+      // 👈 在 iOS 上，STT 啟動不能有延遲。我們將它從 setTimeout 拔出，並用微任務或直接呼叫
+      isAnalyzing.value = true;
+      console.log('🎤 開始進行語音辨識...');
+
+      // 使用 Promise.resolve().then 將其推入微任務隊列，確保 UI 已更新
+      Promise.resolve().then(async () => {
         try {
           const result = await startListening(props.targetSentence.replace(/\|/g, ''));
+          console.log('📝 辨識完成結果:', result);
           transcript.value = result.text;
           isMatch.value = result.match;
         } catch (err) {
-          console.error('STT error:', err);
+          console.error('🚨 辨識發生嚴重錯誤:', err);
           transcript.value = '辨識失敗，請重試。';
         } finally {
           isAnalyzing.value = false;
         }
-      }, 250);
+      });
     };
 
     mediaRecorder.start();
@@ -89,6 +89,7 @@ const startRecording = async () => {
     transcript.value = '';
     isMatch.value = false;
   } catch (err: any) {
+    console.error('🚨 無法啟動錄音:', err);
     alert('無法啟動麥克風，請確認瀏覽器權限。');
   }
 };
@@ -132,7 +133,7 @@ onUnmounted(() => {
     </div>
 
     <div class="controls">
-      <button class="btn-audio" @click="speak(targetSentence.replace(/\|/g, ''), playbackRate)">
+      <button class="btn-audio" @click="speak(targetSentence.replace(/\|/g, ''), { rate: playbackRate })">
         🔊 聽標準發音 ({{ playbackRate }}x)
       </button>
 
@@ -148,13 +149,11 @@ onUnmounted(() => {
         ▶️ 播放我的錄音
       </button>
 
-      <!-- 👇 新增：跳過語音按鈕 -->
       <button v-if="!isRecording" class="btn-skip" @click="emit('skip')">
         ⏭️ 跳過語音
       </button>
     </div>
 
-    <!-- 對照面板保持不變 -->
     <div v-if="hasRecording || isAnalyzing" class="result-panel">
       <div class="word-comparison">
         <div class="target-line">
@@ -179,8 +178,7 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-/* 樣式保持不變，新增 skip 按鈕樣式 */
-/* ... 之前的樣式 ... */
+/* 樣式保持不變 */
 .btn-skip {
   background: #f0f0f0;
   color: #777;
@@ -192,7 +190,6 @@ onUnmounted(() => {
   transform: translateY(4px);
 }
 
-/* 以下保留你原本的樣式... */
 .analyzer-container {
   display: flex;
   flex-direction: column;

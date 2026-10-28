@@ -10,12 +10,16 @@ import PronunciationAnalyzer from './components/PronunciationAnalyzer.vue';
 import NoticingBoard from './components/NoticingBoard.vue';
 import SummaryReport from './components/SummaryReport.vue';
 import ChunkPreview from './components/ChunkPreview.vue';
+import DebugConsole from './components/DebugConsole.vue'; // 👈 引入 DebugConsole
 
 import { defaultQuestions } from './data/questions';
 import type { QuestionData } from './rules/types';
-import { useSound, unlockAudioContext } from './utils/useSound'; // 👈 引入解鎖函數
-import { unlockTTS } from './utils/useSpeech'; // 👈 引入解鎖函數
+import { useSound, unlockAudioContext } from './utils/useSound';
+import { unlockTTS } from './utils/useSpeech';
 import { CloudDatabase } from './services/CloudDatabase';
+
+// 👈 判斷網址是否包含 debug=1
+const isDebugMode = window.location.search.includes('debug=1');
 
 const showAdmin = ref(false);
 const showAnalytics = ref(false);
@@ -33,21 +37,17 @@ const sessionLog = ref<string[]>([]);
 const showSummary = ref(false);
 const completedCount = ref(0);
 
-// 👈 全域解鎖處理器
 const handleGlobalInteraction = () => {
   unlockAudioContext();
   unlockTTS();
-  // 解鎖後即可移除監聽
   document.removeEventListener('pointerdown', handleGlobalInteraction);
   document.removeEventListener('touchstart', handleGlobalInteraction);
 };
 
 onMounted(async () => {
-  // 綁定解鎖事件
   document.addEventListener('pointerdown', handleGlobalInteraction);
   document.addEventListener('touchstart', handleGlobalInteraction);
 
-  // 載入題庫
   const cloudQuestions = await CloudDatabase.fetchQuestions();
   if (cloudQuestions && cloudQuestions.length > 0) {
     questionBank.value = cloudQuestions;
@@ -170,7 +170,6 @@ const cancelAuth = () => { showAdminAuth.value = false; adminPasswordInput.value
           :highlightPart="fullSentenceData.modifier" :speechRate="currentQuestion.speechRate || 0.8"
           @skip="nextQuestion" />
         <p v-else class="skip-hint">已略過語音練習。</p>
-
         <button class="btn-primary mt-4" @click="nextQuestion">
           {{ currentIndex < questionBank.length - 1 ? '下一關 ➔' : '完成練習 🏁' }} </button>
       </div>
@@ -236,6 +235,9 @@ const cancelAuth = () => { showAdminAuth.value = false; adminPasswordInput.value
 
     <TeacherAdmin v-if="showAdmin" :currentQuestions="questionBank" @update="updateQuestionBank"
       @close="showAdmin = false" />
+
+    <!-- 👈 渲染 DebugConsole -->
+    <DebugConsole v-if="isDebugMode" />
   </div>
 </template>
 
