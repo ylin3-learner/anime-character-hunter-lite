@@ -2,21 +2,16 @@ import { ref } from 'vue';
 
 let isTTSUnlocked = false;
 
-// 👈 新增：解鎖 Web Speech API (TTS)
 export const unlockTTS = () => {
   if (isTTSUnlocked || !('speechSynthesis' in window)) return;
-  // 播放一個空白字元來騙過 iOS
   const utterance = new SpeechSynthesisUtterance(' ');
   utterance.volume = 0;
   window.speechSynthesis.speak(utterance);
   isTTSUnlocked = true;
-  console.log('🔓 Web Speech API unlocked');
 };
 
-// ── 1. TTS 文字轉語音 ──
 export function useTTS() {
   const isSpeaking = ref(false);
-
   const speak = (text: string, options?: { rate?: number; pitch?: number }) => {
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
@@ -30,11 +25,9 @@ export function useTTS() {
       window.speechSynthesis.speak(utterance);
     }
   };
-
   return { speak, isSpeaking };
 }
 
-// ── 2. 語音辨識 (STT) ──
 export function useSpeechRecognition() {
   const isListening = ref(false);
   const transcript = ref('');
@@ -42,7 +35,6 @@ export function useSpeechRecognition() {
   const error = ref('');
 
   let recognition: any = null;
-
   const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
   if (SpeechRecognition) {
@@ -56,8 +48,7 @@ export function useSpeechRecognition() {
   const startListening = (targetText: string): Promise<{ match: boolean; text: string }> => {
     return new Promise((resolve) => {
       if (!recognition) {
-        error.value = '您的瀏覽器不支援語音辨識';
-        resolve({ match: false, text: '' });
+        resolve({ match: false, text: '瀏覽器不支援' });
         return;
       }
 
@@ -82,17 +73,27 @@ export function useSpeechRecognition() {
         resolve({ match, text: resultText });
       };
 
-      recognition.onerror = () => {
-        error.value = '語音辨識發生錯誤，請確認麥克風權限。';
+      // 👈 修改：把具體錯誤印出來，並 resolve 帶有錯誤字串的結果
+      recognition.onerror = (event: any) => {
+        console.error('🚨 語音辨識發生錯誤 (onerror):', event.error);
         isListening.value = false;
-        resolve({ match: false, text: '' });
+        resolve({ match: false, text: `[系統錯誤: ${event.error}]` });
       };
 
       recognition.onend = () => {
         isListening.value = false;
+        // 如果 onresult 沒有觸發，onend 會先觸發，這裡給個安全防護
+        if (isListening.value) {
+          resolve({ match: false, text: '[未收到語音]' });
+        }
       };
 
-      recognition.start();
+      try {
+        recognition.start();
+      } catch (e: any) {
+        console.error('🚨 無法啟動:', e);
+        resolve({ match: false, text: `[啟動失敗: ${e.message}]` });
+      }
     });
   };
 
