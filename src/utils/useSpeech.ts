@@ -4,7 +4,6 @@ let isTTSUnlocked = false;
 let globalVoices: SpeechSynthesisVoice[] = [];
 let currentAudio: HTMLAudioElement | null = null;
 
-// 👈 定義微軟 Edge TTS 的高品質語音池
 const edgeVoices = [
   'en-US-AriaNeural',      // 女聲，活潑
   'en-US-GuyNeural',       // 男聲，沉穩
@@ -38,51 +37,51 @@ export function useTTS() {
 
   const speak = async (text: string, options?: { rate?: number }) => {
     const rate = options?.rate ?? 0.8;
-    
-    // 抓取系統所有的英文語音包
+
     const enVoices = globalVoices.filter(v => v.lang.toLowerCase().includes('en'));
 
     if (enVoices.length > 0) {
-      // 👈 情況 A：學生平板（有原生語音包）
+      // 情況 A：系統原生 TTS (平板)
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'en-US';
       utterance.rate = rate;
-      
-      // 👈 隨機挑選一個系統的英文語音包
+
       const randomVoice = enVoices[Math.floor(Math.random() * enVoices.length)];
       utterance.voice = randomVoice;
-      
+
       utterance.onstart = () => { isSpeaking.value = true; };
       utterance.onend = () => { isSpeaking.value = false; };
       window.speechSynthesis.speak(utterance);
     } else {
-      // 👈 情況 B：智慧白板（無原生語音包，呼叫 Supabase）
+      // 情況 B：Supabase Edge TTS (智慧白板)
       console.log('⚠️ 系統無語音包，呼叫 Supabase Edge TTS...');
       isSpeaking.value = true;
-      
+
       try {
         const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-        
-        // 👈 隨機挑選一個微軟 Edge 語音包
         const randomEdgeVoice = edgeVoices[Math.floor(Math.random() * edgeVoices.length)];
-        console.log(`🎲 隨機使用 Edge 語音: ${randomEdgeVoice}`);
-        
+        console.log(`🎲 隨機使用 Edge 語音: ${randomEdgeVoice}，語速: ${rate}`);
+
         const res = await fetch(`${supabaseUrl}/functions/v1/edge-tts`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            text, 
+          body: JSON.stringify({
+            text,
             rate: rate.toString(),
-            voice: randomEdgeVoice // 👈 把選中的語音傳給後端
+            voice: randomEdgeVoice
           })
         });
 
         const data = await res.json();
-        
+
         if (data.url) {
           if (currentAudio) currentAudio.pause();
           currentAudio = new Audio(data.url);
+
+          // 👈 雙重保險：前端播放時也設定播放速度 (現代瀏覽器會做到不變調變速)
+          currentAudio.playbackRate = rate;
+
           currentAudio.onended = () => { isSpeaking.value = false; };
           currentAudio.onerror = () => { isSpeaking.value = false; console.error('音檔播放失敗'); };
           await currentAudio.play();
@@ -99,7 +98,6 @@ export function useTTS() {
   return { speak, isSpeaking };
 }
 
-// 👈 保留原本的 STT 函數（目前 Sprint 1 先不用，但保留給 Sprint 2）
 export function useSpeechRecognition() {
   const isListening = ref(false);
   const transcript = ref('');
