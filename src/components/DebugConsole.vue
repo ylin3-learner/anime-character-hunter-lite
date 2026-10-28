@@ -17,6 +17,10 @@ const originalError = console.error;
 
 const formatArgs = (args: any[]) => {
     return args.map(arg => {
+        // 👈 修正：把 Error 物件轉成字串，不然會變成 {}
+        if (arg instanceof Error) {
+            return arg.stack || arg.message;
+        }
         if (typeof arg === 'object') {
             try { return JSON.stringify(arg, null, 2); } catch (e) { return String(arg); }
         }
@@ -74,7 +78,7 @@ const clearLogs = () => { logs.value = []; };
             </div>
         </div>
 
-        <!-- 👈 新增：TTS 診斷區塊 -->
+        <!-- TTS 診斷區塊 -->
         <div class="tts-diagnostic">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                 <span style="font-weight: bold; color: #48dbfb;">🔊 TTS 系統狀態</span>
@@ -87,14 +91,19 @@ const clearLogs = () => { logs.value = []; };
                         測試</button>
                 </div>
             </div>
-            <div v-if="voicesList.length === 0" style="color: #ff6b6b; font-size: 0.8rem;">
+            <div v-if="voicesList.length === 0" style="color: #ff6b6b; font-size: 0.8rem; margin-bottom: 8px;">
                 ❌ 系統無可用語音包！
             </div>
             <div v-else
-                style="max-height: 100px; overflow-y: auto; font-size: 0.75rem; background: #111; padding: 6px; border-radius: 4px;">
+                style="max-height: 100px; overflow-y: auto; font-size: 0.75rem; background: #111; padding: 6px; border-radius: 4px; margin-bottom: 8px;">
                 <div v-for="voice in voicesList" :key="voice.name" style="color: #feca57; margin-bottom: 2px;">
                     [{{ voice.lang }}] {{ voice.name }}
                 </div>
+            </div>
+
+            <div style="font-size: 0.8rem; background: #333; padding: 6px; border-radius: 4px; color: #ddd;">
+                <span v-if="voicesList.length > 0" style="color: #58cc02;">✅ 目前使用：原生系統 TTS</span>
+                <span v-else style="color: #feca57;">⚠️ 目前使用：Edge TTS (Supabase 代理)</span>
             </div>
         </div>
 
@@ -109,6 +118,7 @@ const clearLogs = () => { logs.value = []; };
 </template>
 
 <style scoped>
+/* 樣式保持不變 */
 .debug-btn {
     position: fixed;
     bottom: 20px;
@@ -132,7 +142,6 @@ const clearLogs = () => { logs.value = []; };
     width: 90vw;
     max-width: 500px;
     height: 65vh;
-    /* 稍微加高以容納診斷區塊 */
     background: #1e1e1e;
     color: #d4d4d4;
     border-radius: 12px;
@@ -165,7 +174,6 @@ const clearLogs = () => { logs.value = []; };
     margin-left: 8px;
 }
 
-/* 👈 診斷區塊樣式 */
 .tts-diagnostic {
     padding: 10px 16px;
     background: #2a2a2a;

@@ -1,13 +1,14 @@
-// 👈 改為使用 deno.json 定義的模組名稱，消除 Lint 警告
-import { createClient } from "@supabase/supabase-js"
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+// 👈 修正 1：改用 npm: 協議引入，解決 no-import-prefix 與 default export 錯誤
+import md5 from "npm:blueimp-md5@2.19.0"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-// 👈 使用 Deno 內建的 serve
-Deno.serve(async (req: Request) => {
+serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
@@ -22,17 +23,10 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
-    // 使用 Deno 內建的 crypto 產生 SHA-256 雜湊作為檔名
-    const hashBuffer = await crypto.subtle.digest(
-      "SHA-256", 
-      new TextEncoder().encode(text + voice + prosodyRate)
-    )
-    const hashArray = Array.from(new Uint8Array(hashBuffer))
-    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
-    const fileName = `${hashHex}.mp3`
+    const fileName = `${md5(text + voice + prosodyRate)}.mp3`
 
-    // 檢查快取
-    const { data: fileData, error: _fileError } = await supabaseClient.storage
+    // 👈 修正 2：移除未使用的 fileError
+    const { data: fileData } = await supabaseClient.storage
       .from('tts-audio')
       .list('', { search: fileName })
 
@@ -43,18 +37,22 @@ Deno.serve(async (req: Request) => {
       })
     }
 
-    // 微軟最新端點
     const edgeUrl = `https://api.msedgeservices.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4`
 
     const payload = `X-Timestamp:${Date.now()}\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n{"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"false","wordBoundaryEnabled":"false"},"outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}\r\nX-RequestId:${crypto.randomUUID()}\r\nContent-Type:application/ssml+xml\r\nPath:ssml\r\n\r\n<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'><voice name='${voice}'><prosody rate='${prosodyRate}'>${text}</prosody></voice></speak>`
 
+    console.log(`[Edge Function] 正在請求微軟 API...`)
     const response = await fetch(edgeUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain; charset=utf-8' },
       body: payload
     })
 
-    if (!response.ok) throw new Error("Edge TTS API failed")
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[Edge Function] 微軟 API 回應失敗: ${response.status}`, errorText);
+      throw new Error(`Edge TTS API failed with status ${response.status}`);
+    }
 
     const arrayBuffer = await response.arrayBuffer()
     const uint8Array = new Uint8Array(arrayBuffer)
@@ -80,9 +78,11 @@ Deno.serve(async (req: Request) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })
 
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    return new Response(JSON.stringify({ error: message }), {
+    // 👈 修正 3：移除 any 型別，改用安全的方式取得 error message
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`[Edge Function] 執行出錯:`, errorMessage);
+    return new Response(JSON.stringify({ error: errorMessage }), {
       status: 400,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })
