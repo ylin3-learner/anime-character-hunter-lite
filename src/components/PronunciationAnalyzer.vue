@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, onUnmounted, computed } from 'vue';
-import { useSpeechRecognition, useTTS } from '../utils/useSpeech';
+import { ref, onUnmounted } from 'vue';
+import { useTTS } from '../utils/useSpeech';
 
 const props = defineProps<{
   targetSentence: string;
@@ -10,28 +10,15 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{ (e: 'skip'): void; }>();
-const { isSupported, startListening } = useSpeechRecognition();
 const { speak } = useTTS();
 
 const playbackRate = ref(props.speechRate || 0.85);
 const hasRecording = ref(false);
-const transcript = ref('');
-const isMatch = ref(false);
 const audioUrl = ref<string | null>(null);
 const isRecording = ref(false);
-const isAnalyzing = ref(false);
 
 let mediaRecorder: MediaRecorder | null = null;
 let audioChunks: Blob[] = [];
-
-const targetWords = computed(() => props.targetSentence.replace(/\|/g, '').trim().split(/\s+/));
-const resultWords = computed(() => transcript.value.trim().split(/\s+/));
-
-const isWordMatched = (word: string) => {
-  if (!transcript.value) return false;
-  const cleanWord = word.toLowerCase().replace(/[.,?!]/g, '');
-  return resultWords.value.some(w => w.toLowerCase().replace(/[.,?!]/g, '').includes(cleanWord));
-};
 
 const startRecording = async () => {
   try {
@@ -52,40 +39,18 @@ const startRecording = async () => {
     };
 
     mediaRecorder.onstop = () => {
-      // 關閉麥克風
       stream.getTracks().forEach(track => track.stop());
-
       if (audioChunks.length > 0) {
         const actualMimeType = mediaRecorder?.mimeType || 'audio/webm';
         const audioBlob = new Blob(audioChunks, { type: actualMimeType });
         audioUrl.value = URL.createObjectURL(audioBlob);
         hasRecording.value = true;
       }
-
-      isAnalyzing.value = true;
-      console.log('🎤 麥克風已關閉，準備啟動語音辨識...');
-
-      // 👈 關鍵修正：延遲 500ms 再啟動 STT，避免 iOS 麥克風資源衝突
-      setTimeout(async () => {
-        try {
-          const result = await startListening(props.targetSentence.replace(/\|/g, ''));
-          console.log('📝 辨識完成結果:', result);
-          transcript.value = result.text;
-          isMatch.value = result.match;
-        } catch (err) {
-          console.error('🚨 STT 發生嚴重錯誤:', err);
-          transcript.value = '辨識失敗，請重試。';
-        } finally {
-          isAnalyzing.value = false;
-        }
-      }, 500);
     };
 
     mediaRecorder.start();
     isRecording.value = true;
     hasRecording.value = false;
-    transcript.value = '';
-    isMatch.value = false;
   } catch (err: any) {
     console.error('🚨 無法啟動錄音:', err);
     alert('無法啟動麥克風，請確認瀏覽器權限。');
@@ -132,10 +97,10 @@ onUnmounted(() => {
 
     <div class="controls">
       <button class="btn-audio" @click="speak(targetSentence.replace(/\|/g, ''), { rate: playbackRate })">
-        🔊 聽標準發音 ({{ playbackRate }}x)
+        🔊 聽標準發音
       </button>
 
-      <button v-if="!isRecording && isSupported" class="btn-mic" @click="startRecording" :disabled="isAnalyzing">
+      <button v-if="!isRecording" class="btn-mic" @click="startRecording">
         🎤 開始錄音
       </button>
 
@@ -147,36 +112,24 @@ onUnmounted(() => {
         ▶️ 播放我的錄音
       </button>
 
-      <button v-if="!isRecording" class="btn-skip" @click="emit('skip')">
-        ⏭️ 跳過語音
+      <button v-if="!isRecording" class="btn-skip" :class="{ 'is-primary': hasRecording }" @click="emit('skip')">
+        {{ hasRecording ? '✅ 聽完錄音，繼續遊戲' : '⏭️ 跳過語音' }}
       </button>
     </div>
 
-    <div v-if="hasRecording || isAnalyzing" class="result-panel">
-      <div class="word-comparison">
-        <div class="target-line">
-          <span v-for="(word, index) in targetWords" :key="index" class="word"
-            :class="isWordMatched(word) ? 'matched' : 'missed'">
-            {{ word }}
-          </span>
-        </div>
-
-        <div class="result-line">
-          <p v-if="isAnalyzing" class="status-text">⏳ 正在分析發音...</p>
-          <p v-else-if="isMatch" class="status-text success">✅ 太棒了！發音完全正確。</p>
-          <p v-else class="status-text error">⚠️ 辨識結果有些落差，請點擊播放聽聽看。</p>
-
-          <p class="transcript-text" :class="{ 'has-error': !isMatch }">
-            「{{ transcript || '未辨識出聲音' }}」
-          </p>
-        </div>
-      </div>
+    <!-- 錄音後的提示區塊 -->
+    <div v-if="hasRecording && !isRecording" class="result-panel" style="text-align: center;">
+      <p style="color: #58cc02; font-weight: bold; font-size: 1.1rem; margin-bottom: 8px;">
+        🎧 錄音完成！
+      </p>
+      <p style="color: #777;">
+        請點擊「播放我的錄音」聽聽看自己的發音，確認無誤後點擊下方按鈕繼續。
+      </p>
     </div>
   </div>
 </template>
 
 <style scoped>
-/* 樣式保持不變 */
 .btn-skip {
   background: #f0f0f0;
   color: #777;
@@ -184,6 +137,17 @@ onUnmounted(() => {
 }
 
 .btn-skip:active {
+  border-bottom-width: 0;
+  transform: translateY(4px);
+}
+
+.btn-skip.is-primary {
+  background: #58cc02;
+  color: white;
+  border-bottom-color: #46a302;
+}
+
+.btn-skip.is-primary:active {
   border-bottom-width: 0;
   transform: translateY(4px);
 }
@@ -320,71 +284,6 @@ button:disabled {
   border: 2px solid #e5e5e5;
   border-radius: 16px;
   padding: 20px;
-  text-align: left;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-}
-
-.word-comparison {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.target-line {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  font-size: 1.2rem;
-  line-height: 1.6;
-}
-
-.word {
-  padding: 4px 8px;
-  border-radius: 6px;
-  transition: all 0.3s;
-}
-
-.word.matched {
-  background: #e6f7e6;
-  color: #1c9c1c;
-  font-weight: bold;
-}
-
-.word.missed {
-  background: #f0f0f0;
-  color: #999;
-  text-decoration: line-through;
-}
-
-.result-line {
-  border-top: 2px dashed #eee;
-  padding-top: 16px;
-}
-
-.status-text {
-  font-weight: bold;
-  margin-bottom: 8px;
-}
-
-.status-text.success {
-  color: #58cc02;
-}
-
-.status-text.error {
-  color: #ff4b4b;
-}
-
-.transcript-text {
-  color: #555;
-  font-size: 1.1rem;
-  background: #f9f9f9;
-  padding: 12px;
-  border-radius: 8px;
-  margin: 0;
-}
-
-.transcript-text.has-error {
-  color: #ea2b2b;
-  background: #ffe6e6;
 }
 </style>
