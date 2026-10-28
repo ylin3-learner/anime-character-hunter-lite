@@ -1,5 +1,5 @@
-import type { QuestionData } from '../data/questions';
 import { supabase } from './supabaseClient';
+import type { QuestionData } from '../rules/types'; // 統一從這裡引入
 
 // 學習軌跡型別
 export interface LearningLog {
@@ -32,7 +32,7 @@ export const CloudDatabase = {
   // 將題庫存到雲端（包含同步刪除）
   async saveQuestions(questions: QuestionData[]): Promise<boolean> {
     try {
-      // 👇 1. 先取得雲端現有的所有題目 ID
+      // 1. 先取得雲端現有的所有題目 ID
       const { data: cloudData, error: fetchError } = await supabase
         .from('questions')
         .select('id');
@@ -42,10 +42,10 @@ export const CloudDatabase = {
       const cloudIds = cloudData?.map(d => d.id) || [];
       const localIds = questions.map(q => q.id);
 
-      // 👇 2. 找出「雲端有，但本地已經被刪除」的 ID
+      // 2. 找出「雲端有，但本地已經被刪除」的 ID
       const idsToDelete = cloudIds.filter(id => !localIds.includes(id));
 
-      // 👇 3. 如果有需要刪除的題目，執行批次刪除
+      // 3. 如果有需要刪除的題目，執行批次刪除
       if (idsToDelete.length > 0) {
         const { error: deleteError } = await supabase
           .from('questions')
@@ -55,7 +55,7 @@ export const CloudDatabase = {
         if (deleteError) throw deleteError;
       }
 
-      // 👇 4. 執行 upsert（更新既有的，插入新的）
+      // 4. 執行 upsert（更新既有的，插入新的）
       if (questions.length > 0) {
         const rows = questions.map(q => ({
           id: q.id,
