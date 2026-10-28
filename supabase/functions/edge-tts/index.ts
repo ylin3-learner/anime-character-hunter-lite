@@ -1,21 +1,19 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
-import md5 from "https://esm.sh/blueimp-md5@2.19.0"
+// 👈 改為使用 deno.json 定義的模組名稱，消除 Lint 警告
+import { createClient } from "@supabase/supabase-js"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-serve(async (req) => {
+// 👈 使用 Deno 內建的 serve
+Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    // 接收 voice 與 rate 參數
     const { text, rate = "1.0", voice = "en-US-AriaNeural" } = await req.json()
     if (!text) throw new Error("Missing text")
 
-    // 👈 把 0.8 轉成 "-20%"，把 1.2 轉成 "+20%"
     const numericRate = parseFloat(rate);
     const prosodyRate = numericRate === 1.0 ? "+0%" : `${Math.round((numericRate - 1) * 100)}%`;
 
@@ -24,11 +22,17 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
-    // 👈 關鍵：把 voice 跟 prosodyRate 加進 MD5，確保不同聲音與語速有獨立的快取檔
-    const fileName = `${md5(text + voice + prosodyRate)}.mp3`
+    // 使用 Deno 內建的 crypto 產生 SHA-256 雜湊作為檔名
+    const hashBuffer = await crypto.subtle.digest(
+      "SHA-256", 
+      new TextEncoder().encode(text + voice + prosodyRate)
+    )
+    const hashArray = Array.from(new Uint8Array(hashBuffer))
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+    const fileName = `${hashHex}.mp3`
 
     // 檢查快取
-    const { data: fileData, error: fileError } = await supabaseClient.storage
+    const { data: fileData, error: _fileError } = await supabaseClient.storage
       .from('tts-audio')
       .list('', { search: fileName })
 
@@ -39,10 +43,9 @@ serve(async (req) => {
       })
     }
 
-    // 呼叫微軟 Edge TTS API
-    const edgeUrl = `https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4`
+    // 微軟最新端點
+    const edgeUrl = `https://api.msedgeservices.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4`
 
-    // 修正：這裡要使用 prosodyRate 而不是 rate
     const payload = `X-Timestamp:${Date.now()}\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n{"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"false","wordBoundaryEnabled":"false"},"outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}\r\nX-RequestId:${crypto.randomUUID()}\r\nContent-Type:application/ssml+xml\r\nPath:ssml\r\n\r\n<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'><voice name='${voice}'><prosody rate='${prosodyRate}'>${text}</prosody></voice></speak>`
 
     const response = await fetch(edgeUrl, {
@@ -77,8 +80,9 @@ serve(async (req) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })
 
-  } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return new Response(JSON.stringify({ error: message }), {
       status: 400,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })
