@@ -1,6 +1,23 @@
 import { ref } from 'vue';
 
 let isTTSUnlocked = false;
+let globalVoices: SpeechSynthesisVoice[] = [];
+
+// 👈 新增：載入並監聽語音包
+const loadVoices = () => {
+  if ('speechSynthesis' in window) {
+    globalVoices = window.speechSynthesis.getVoices();
+    if (globalVoices.length > 0) {
+      console.log(`✅ TTS 語音包已載入，共 ${globalVoices.length} 個`);
+    }
+  }
+};
+
+// 初始化時立刻嘗試載入，並綁定變化事件（解決非同步載入問題）
+if ('speechSynthesis' in window) {
+  loadVoices();
+  window.speechSynthesis.onvoiceschanged = loadVoices;
+}
 
 export const unlockTTS = () => {
   if (isTTSUnlocked || !('speechSynthesis' in window)) return;
@@ -12,19 +29,47 @@ export const unlockTTS = () => {
 
 export function useTTS() {
   const isSpeaking = ref(false);
+  
   const speak = (text: string, options?: { rate?: number; pitch?: number }) => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'en-US';
-      utterance.rate = options?.rate ?? 0.8;
-      utterance.pitch = options?.pitch ?? 1;
-      utterance.onstart = () => { isSpeaking.value = true; };
-      utterance.onend = () => { isSpeaking.value = false; };
-      utterance.onerror = () => { isSpeaking.value = false; };
-      window.speechSynthesis.speak(utterance);
+    if (!('speechSynthesis' in window)) {
+      console.warn('❌ 此瀏覽器不支援 TTS');
+      return;
     }
+
+    window.speechSynthesis.cancel();
+
+    // 如果陣列是空的，再抓一次
+    if (globalVoices.length === 0) loadVoices();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'en-US';
+    utterance.rate = options?.rate ?? 0.8;
+    utterance.pitch = options?.pitch ?? 1;
+
+    // 👈 核心修正：強制匹配英文語音包
+    // 如果系統預設是中文，不指定 voice 會導致靜音。
+    const enVoice = globalVoices.find(v => v.lang.toLowerCase().includes('en'));
+    if (enVoice) {
+      utterance.voice = enVoice;
+    } else {
+      console.warn('⚠️ 找不到英文語音包，嘗試使用系統預設...');
+    }
+
+    utterance.onstart = () => { 
+      console.log('🔊 TTS 開始播放');
+      isSpeaking.value = true; 
+    };
+    utterance.onend = () => { 
+      isSpeaking.value = false; 
+    };
+    utterance.onerror = (e) => { 
+      console.error('🚨 TTS 發生錯誤:', e.error);
+      isSpeaking.value = false; 
+    };
+
+    window.speechSynthesis.speak(utterance);
   };
+
   return { speak, isSpeaking };
 }
 
@@ -73,7 +118,6 @@ export function useSpeechRecognition() {
         resolve({ match, text: resultText });
       };
 
-      // 👈 修改：把具體錯誤印出來，並 resolve 帶有錯誤字串的結果
       recognition.onerror = (event: any) => {
         console.error('🚨 語音辨識發生錯誤 (onerror):', event.error);
         isListening.value = false;
@@ -82,7 +126,6 @@ export function useSpeechRecognition() {
 
       recognition.onend = () => {
         isListening.value = false;
-        // 如果 onresult 沒有觸發，onend 會先觸發，這裡給個安全防護
         if (isListening.value) {
           resolve({ match: false, text: '[未收到語音]' });
         }

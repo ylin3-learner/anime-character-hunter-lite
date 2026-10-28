@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
+import { useTTS } from '../utils/useSpeech';
 
 const isOpen = ref(false);
 const logs = ref<{ type: string; text: string; time: string }[]>([]);
+
+// TTS 診斷狀態
+const voicesList = ref<SpeechSynthesisVoice[]>([]);
+const { speak } = useTTS();
 
 const getTime = () => new Date().toLocaleTimeString('en-US', { hour12: false });
 
@@ -19,6 +24,18 @@ const formatArgs = (args: any[]) => {
     }).join(' ');
 };
 
+const refreshVoices = () => {
+    if ('speechSynthesis' in window) {
+        voicesList.value = window.speechSynthesis.getVoices();
+        console.log(`🔄 已刷新語音包，共 ${voicesList.value.length} 個`);
+    }
+};
+
+const testTTS = () => {
+    console.log('🧪 點擊了測試 TTS 按鈕...');
+    speak('Hello, this is a test 1 2 3.', { rate: 0.8 });
+};
+
 onMounted(() => {
     console.log = (...args) => {
         logs.value.push({ type: 'log', text: formatArgs(args), time: getTime() });
@@ -32,6 +49,8 @@ onMounted(() => {
         logs.value.push({ type: 'error', text: formatArgs(args), time: getTime() });
         originalError.apply(console, args);
     };
+
+    refreshVoices();
 });
 
 onUnmounted(() => {
@@ -54,6 +73,31 @@ const clearLogs = () => { logs.value = []; };
                 <button @click="isOpen = false">✖ 關閉</button>
             </div>
         </div>
+
+        <!-- 👈 新增：TTS 診斷區塊 -->
+        <div class="tts-diagnostic">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="font-weight: bold; color: #48dbfb;">🔊 TTS 系統狀態</span>
+                <div>
+                    <button @click="refreshVoices"
+                        style="background: #555; color: white; border: none; padding: 4px 8px; border-radius: 4px; margin-right: 4px; cursor: pointer;">🔄
+                        刷新</button>
+                    <button @click="testTTS"
+                        style="background: #58cc02; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer;">▶️
+                        測試</button>
+                </div>
+            </div>
+            <div v-if="voicesList.length === 0" style="color: #ff6b6b; font-size: 0.8rem;">
+                ❌ 系統無可用語音包！
+            </div>
+            <div v-else
+                style="max-height: 100px; overflow-y: auto; font-size: 0.75rem; background: #111; padding: 6px; border-radius: 4px;">
+                <div v-for="voice in voicesList" :key="voice.name" style="color: #feca57; margin-bottom: 2px;">
+                    [{{ voice.lang }}] {{ voice.name }}
+                </div>
+            </div>
+        </div>
+
         <div class="debug-body">
             <div v-if="logs.length === 0" class="empty">目前沒有日誌</div>
             <div v-for="(log, index) in logs" :key="index" :class="['log-item', log.type]">
@@ -87,7 +131,8 @@ const clearLogs = () => { logs.value = []; };
     right: 20px;
     width: 90vw;
     max-width: 500px;
-    height: 60vh;
+    height: 65vh;
+    /* 稍微加高以容納診斷區塊 */
     background: #1e1e1e;
     color: #d4d4d4;
     border-radius: 12px;
@@ -118,6 +163,13 @@ const clearLogs = () => { logs.value = []; };
     border-radius: 4px;
     cursor: pointer;
     margin-left: 8px;
+}
+
+/* 👈 診斷區塊樣式 */
+.tts-diagnostic {
+    padding: 10px 16px;
+    background: #2a2a2a;
+    border-bottom: 2px solid #333;
 }
 
 .debug-body {
