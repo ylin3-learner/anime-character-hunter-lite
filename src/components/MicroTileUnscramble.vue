@@ -3,6 +3,8 @@ import { ref, watch, computed } from 'vue';
 import { validatePostModifier } from '../rules/grammarRules';
 import type { Antecedent, DiagnosticSignal } from '../rules/types';
 import { useSound } from '../utils/useSound';
+import { useTTS } from '../utils/useSpeech';
+const { speak } = useTTS();
 
 const { playError, playSuccess } = useSound();
 
@@ -12,6 +14,7 @@ const props = defineProps<{
   correctAnswer: string[];
   mode?: 'build' | 'reduce';
   contextCloze?: { prefix: string; suffix: string };
+  speechRate?: number; // 加上這個
 }>();
 
 const emit = defineEmits<{
@@ -80,7 +83,7 @@ const checkAnswer = () => {
       const utterance = new SpeechSynthesisUtterance(currentAnswerStr);
       utterance.lang = 'en-US';
       utterance.rate = 0.9;
-      window.speechSynthesis.speak(utterance);
+      speak(currentAnswerStr, { rate: props.speechRate ?? 0.8 }); // 套用語速
     }
 
     setTimeout(() => emit('success'), 1500);

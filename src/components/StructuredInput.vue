@@ -5,6 +5,7 @@ import { useTTS } from '../utils/useSpeech';
 const props = defineProps<{
   audioText: string;
   options: { image: string; text: string; isCorrect: boolean }[];
+  speechRate?: number; // 加上這個
 }>();
 
 const emit = defineEmits<{
@@ -24,8 +25,11 @@ const isRealImage = (url: string) => {
 };
 
 const playAudio = () => {
-  speak(props.audioText);
+  speak(props.audioText, { rate: props.speechRate ?? 0.8 }); // 套用語速
 };
+
+// 答錯時重新播放
+speak(props.audioText, { rate: props.speechRate ?? 0.8 });
 
 const handleSelect = (opt: { isCorrect: boolean }, index: number) => {
   if (isSuccess.value) return;

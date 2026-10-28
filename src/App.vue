@@ -13,7 +13,6 @@ import ChunkPreview from './components/ChunkPreview.vue';
 
 import { defaultQuestions } from './data/questions';
 import type { QuestionData } from './rules/types';
-
 import { useSound } from './utils/useSound';
 import { CloudDatabase } from './services/CloudDatabase';
 
@@ -24,85 +23,59 @@ const currentIndex = ref(0);
 const questionBank = ref<QuestionData[]>([]);
 const currentStage = ref<'preview' | 'input' | 'macro' | 'micro' | 'success' | 'noticing'>('preview');
 const currentMode = ref<'relative' | 'preposition'>('relative');
-
 const { playSuccess } = useSound();
 
 const showAdminAuth = ref(false);
 const adminPasswordInput = ref('');
 const isAdminAuthenticated = ref(sessionStorage.getItem('admin_auth') === 'true');
-
 const sessionLog = ref<string[]>([]);
 const showSummary = ref(false);
 const completedCount = ref(0);
 
 onMounted(async () => {
   const cloudQuestions = await CloudDatabase.fetchQuestions();
-
   if (cloudQuestions && cloudQuestions.length > 0) {
     questionBank.value = cloudQuestions;
     localStorage.setItem('custom_questions', JSON.stringify(cloudQuestions));
   } else {
     const saved = localStorage.getItem('custom_questions');
     if (saved) {
-      try { questionBank.value = JSON.parse(saved); } catch (e) {
-        questionBank.value = [...defaultQuestions] as unknown as QuestionData[];
-      }
+      try { questionBank.value = JSON.parse(saved); } catch (e) { questionBank.value = [...defaultQuestions] as unknown as QuestionData[]; }
     } else {
       questionBank.value = [...defaultQuestions] as unknown as QuestionData[];
     }
   }
+  fixAntecedentNumbers();
   checkAndSetInitialStage();
 });
 
-const currentQuestion = computed(() => questionBank.value[currentIndex.value] || (defaultQuestions[0] as unknown as QuestionData));
+const fixAntecedentNumbers = () => {
+  questionBank.value.forEach(q => {
+    if (q.targetNoun.toLowerCase().endsWith('s') && !q.targetNoun.toLowerCase().endsWith('is') && !q.targetNoun.toLowerCase().endsWith('this')) {
+      q.antecedent.number = 'plural';
+    }
+  });
+};
 
-const getEnabledStages = computed(() => {
-  return currentQuestion.value.enabledStages || ['input', 'macro', 'micro', 'pronunciation', 'noticing'];
-});
+const currentQuestion = computed(() => questionBank.value[currentIndex.value] || (defaultQuestions[0] as unknown as QuestionData));
+const getEnabledStages = computed(() => currentQuestion.value.enabledStages || ['input', 'macro', 'micro', 'pronunciation', 'noticing']);
 
 const checkAndSetInitialStage = () => {
-  if (currentQuestion.value.type === 'contrast') {
-    currentStage.value = 'macro';
-    return;
-  }
-
-  if (currentQuestion.value.type === 'chunk') {
-    currentStage.value = 'preview';
-    return;
-  }
-
-  if (currentQuestion.value.previewData && getEnabledStages.value.includes('input')) {
-    currentStage.value = 'preview';
-  } else if (getEnabledStages.value.includes('input') && currentQuestion.value.inputData) {
-    currentStage.value = 'input';
-  } else if (getEnabledStages.value.includes('macro')) {
-    currentStage.value = 'macro';
-  } else if (getEnabledStages.value.includes('micro')) {
-    currentStage.value = 'micro';
-  } else {
-    currentStage.value = 'success';
-  }
+  if (currentQuestion.value.type === 'contrast') { currentStage.value = 'macro'; return; }
+  if (currentQuestion.value.type === 'chunk') { currentStage.value = 'preview'; return; }
+  if (currentQuestion.value.previewData && getEnabledStages.value.includes('input')) currentStage.value = 'preview';
+  else if (getEnabledStages.value.includes('input') && currentQuestion.value.inputData) currentStage.value = 'input';
+  else if (getEnabledStages.value.includes('macro')) currentStage.value = 'macro';
+  else if (getEnabledStages.value.includes('micro')) currentStage.value = 'micro';
+  else currentStage.value = 'success';
 };
 
-const handlePreviewSuccess = () => {
-  if (currentQuestion.value.type === 'chunk') {
-    handleSuccess();
-  } else {
-    currentStage.value = 'input';
-  }
-};
+const handlePreviewSuccess = () => { currentQuestion.value.type === 'chunk' ? handleSuccess() : currentStage.value = 'input'; };
 
 const fullSentenceData = computed(() => {
   const noun = currentQuestion.value.targetNoun;
-  const modifier = currentQuestion.value.type === 'contrast'
-    ? currentQuestion.value.grammarFeature.relative.label
-    : currentQuestion.value.grammarFeature[currentMode.value].label;
-
-  return {
-    target: `${noun} ${modifier} is my favorite.`,
-    display: `${noun} | ${modifier} | is my favorite.`,
-    modifier
-  };
+  const modifier = currentQuestion.value.type === 'contrast' ? currentQuestion.value.grammarFeature.relative.label : currentQuestion.value.grammarFeature[currentMode.value].label;
+  return { target: `${noun} ${modifier} is my favorite.`, display: `${noun} | ${modifier} | is my favorite.`, modifier };
 });
 
 const handleMisconception = (code: string) => {
@@ -116,47 +89,23 @@ const handleInputSuccess = () => {
   else currentStage.value = 'success';
 };
 
-const handleUnpack = (type: 'relative' | 'preposition') => {
-  currentMode.value = type;
-  currentStage.value = 'micro';
-};
-
-const handleSuccess = () => {
-  playSuccess();
-  currentStage.value = 'success';
-  if (completedCount.value <= currentIndex.value) completedCount.value = currentIndex.value + 1;
-};
+const handleUnpack = (type: 'relative' | 'preposition') => { currentMode.value = type; currentStage.value = 'micro'; };
+const handleSuccess = () => { playSuccess(); currentStage.value = 'success'; if (completedCount.value <= currentIndex.value) completedCount.value = currentIndex.value + 1; };
 
 const nextQuestion = () => {
   window.speechSynthesis.cancel();
-  if (currentStage.value === 'success' && getEnabledStages.value.includes('noticing') && currentQuestion.value.noticingData) {
-    currentStage.value = 'noticing';
-    return;
-  }
-  if (currentIndex.value < questionBank.value.length - 1) {
-    currentIndex.value++;
-    checkAndSetInitialStage();
-  } else {
-    showSummary.value = true;
-  }
+  if (currentStage.value === 'success' && getEnabledStages.value.includes('noticing') && currentQuestion.value.noticingData) { currentStage.value = 'noticing'; return; }
+  if (currentIndex.value < questionBank.value.length - 1) { currentIndex.value++; checkAndSetInitialStage(); } else { showSummary.value = true; }
 };
 
 const handleNoticingComplete = () => {
-  if (currentIndex.value < questionBank.value.length - 1) {
-    currentIndex.value++;
-    checkAndSetInitialStage();
-  } else {
-    showSummary.value = true;
-  }
+  if (currentIndex.value < questionBank.value.length - 1) { currentIndex.value++; checkAndSetInitialStage(); } else { showSummary.value = true; }
 };
 
-const restartGame = () => {
-  currentIndex.value = 0; sessionLog.value = []; completedCount.value = 0; showSummary.value = false;
-  checkAndSetInitialStage();
-};
+const restartGame = () => { currentIndex.value = 0; sessionLog.value = []; completedCount.value = 0; showSummary.value = false; checkAndSetInitialStage(); };
 
 const updateQuestionBank = async (updatedQuestions: QuestionData[]) => {
-  questionBank.value = updatedQuestions; currentIndex.value = 0; checkAndSetInitialStage(); showAdmin.value = false;
+  questionBank.value = updatedQuestions; currentIndex.value = 0; fixAntecedentNumbers(); checkAndSetInitialStage(); showAdmin.value = false;
   localStorage.setItem('custom_questions', JSON.stringify(updatedQuestions));
   const success = await CloudDatabase.saveQuestions(updatedQuestions);
   if (!success) alert('注意：題庫已存在本機，但「雲端同步失敗」，請確認網路連線。');
@@ -196,11 +145,11 @@ const cancelAuth = () => { showAdminAuth.value = false; adminPasswordInput.value
       <div v-else-if="currentStage === 'success'" class="success-screen">
         <div class="confetti">🎉 ✨ 🏆</div>
         <h2>角色解鎖成功！</h2>
-
-        <!-- 👈 移除 type === 'standard' 限制，對比題也能進行語音練習 -->
+        <!-- 👈 傳入 speechRate -->
         <PronunciationAnalyzer v-if="getEnabledStages.includes('pronunciation')"
           :targetSentence="fullSentenceData.target" :displaySentence="fullSentenceData.display"
-          :highlightPart="fullSentenceData.modifier" @skip="nextQuestion" />
+          :highlightPart="fullSentenceData.modifier" :speechRate="currentQuestion.speechRate || 0.8"
+          @skip="nextQuestion" />
         <p v-else class="skip-hint">已略過語音練習。</p>
 
         <button class="btn-primary mt-4" @click="nextQuestion">
@@ -218,15 +167,18 @@ const cancelAuth = () => { showAdminAuth.value = false; adminPasswordInput.value
           @misconception="handleMisconception" />
       </div>
 
+      <!-- 👈 傳入 speechRate -->
       <div v-else-if="currentStage === 'preview' && currentQuestion.previewData" class="stage-content">
         <ChunkPreview :image="currentQuestion.previewData.targetImage" :noun="currentQuestion.previewData.targetNoun"
           :chunk="currentQuestion.previewData.chunkText" :zhMeaning="currentQuestion.previewData.chunkZh"
-          :quizOptions="currentQuestion.previewData.quizOptions" @success="handlePreviewSuccess" />
+          :quizOptions="currentQuestion.previewData.quizOptions" :speechRate="currentQuestion.speechRate || 0.8"
+          @success="handlePreviewSuccess" />
       </div>
 
+      <!-- 👈 傳入 speechRate -->
       <div v-else-if="currentStage === 'input' && currentQuestion.inputData" class="stage-content">
         <StructuredInput :audioText="currentQuestion.inputData.audioText" :options="currentQuestion.inputData.options"
-          @success="handleInputSuccess" />
+          :speechRate="currentQuestion.speechRate || 0.8" @success="handleInputSuccess" />
       </div>
 
       <div v-else-if="currentStage === 'macro'" class="stage-content">
@@ -236,6 +188,7 @@ const cancelAuth = () => { showAdminAuth.value = false; adminPasswordInput.value
           :imageUrl="currentQuestion.imageUrl" @unpack="handleUnpack" />
       </div>
 
+      <!-- 👈 傳入 speechRate -->
       <div v-else-if="currentStage === 'micro'" class="stage-content">
         <h2 class="instruction">圖塊已解鎖！請排列出正確的字序。</h2>
         <div class="target-noun"><span class="highlight">{{ currentQuestion.targetNoun }}</span></div>
@@ -243,7 +196,8 @@ const cancelAuth = () => { showAdminAuth.value = false; adminPasswordInput.value
           :initialTiles="currentQuestion.mode === 'reduce' ? currentQuestion.grammarFeature.relative.tiles : currentQuestion.grammarFeature[currentMode].tiles"
           :antecedent="currentQuestion.antecedent"
           :correctAnswer="currentQuestion.mode === 'reduce' ? currentQuestion.grammarFeature.preposition.correctAnswer : currentQuestion.grammarFeature[currentMode].correctAnswer"
-          :mode="currentQuestion.mode || 'build'" :contextCloze="currentQuestion.contextCloze" @success="handleSuccess"
+          :mode="currentQuestion.mode || 'build'" :contextCloze="currentQuestion.contextCloze"
+          :speechRate="currentQuestion.speechRate || 0.8" @success="handleSuccess"
           @misconception="handleMisconception" />
       </div>
     </main>
@@ -270,7 +224,7 @@ const cancelAuth = () => { showAdminAuth.value = false; adminPasswordInput.value
 </template>
 
 <style scoped>
-/* 樣式保持不變 */
+/* 樣式保持不變，請直接貼上你原有的 style 即可 */
 .app-container {
   max-width: 800px;
   margin: 0 auto;

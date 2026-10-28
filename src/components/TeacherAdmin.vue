@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import type { QuestionData } from '../rules/types';
 import { VueDraggable } from 'vue-draggable-plus';
 
@@ -8,6 +8,7 @@ const props = defineProps<{ currentQuestions: QuestionData[]; }>();
 const enabledStages = ref<('input' | 'macro' | 'micro' | 'pronunciation' | 'noticing')[]>(['input', 'macro', 'micro', 'pronunciation', 'noticing']);
 const questionMode = ref<'build' | 'reduce'>('build');
 const isQuestionsExpanded = ref(true);
+const speechRate = ref<number>(0.8); // 👈 新增語速狀態
 
 const emit = defineEmits<{ (e: 'update', questions: QuestionData[]): void; (e: 'close'): void; }>();
 
@@ -32,6 +33,7 @@ const clozePrefix = ref('');
 const clozeSuffix = ref('');
 const chunkZhInput = ref('');
 const chunkQuizInput = ref('');
+const antecedentNumber = ref<'singular' | 'plural'>('singular');
 
 const correctLabel = ref('');
 const distractorLabel = ref('');
@@ -46,6 +48,7 @@ const isEditing = computed(() => editingId.value !== null);
 const resetForm = () => {
   chunkZhInput.value = ''; chunkQuizInput.value = ''; distractorImageUrl.value = '';
   correctLabel.value = ''; distractorLabel.value = '';
+  antecedentNumber.value = 'singular'; speechRate.value = 0.8; // 👈 重設語速
   editingId.value = null; questionType.value = 'standard'; questionMode.value = 'build';
   enabledStages.value = ['input', 'macro', 'micro', 'pronunciation', 'noticing'];
   imageUrl.value = ''; targetNoun.value = ''; relativeSentence.value = ''; prepositionSentence.value = '';
@@ -59,17 +62,16 @@ const editQuestion = (q: QuestionData) => {
   chunkZhInput.value = q.previewData?.chunkZh || '';
   chunkQuizInput.value = q.previewData?.quizOptions ? q.previewData.quizOptions.filter(o => !o.isCorrect).map(o => o.text).join(', ') : '';
   distractorImageUrl.value = q.inputData?.options.find(o => !o.isCorrect)?.image || '';
-
   correctLabel.value = q.inputData?.options.find(o => o.isCorrect)?.text || '';
   distractorLabel.value = q.inputData?.options.find(o => !o.isCorrect)?.text || '';
 
   editingId.value = q.id; questionType.value = q.type; questionMode.value = q.mode || 'build';
   enabledStages.value = q.enabledStages || ['input', 'macro', 'micro', 'pronunciation', 'noticing'];
-
-  // 優先讀取主圖，若沒有則讀取子圖
   imageUrl.value = q.imageUrl || q.previewData?.targetImage || q.contrastData?.nounImage || '';
-
   targetNoun.value = q.targetNoun;
+  antecedentNumber.value = q.antecedent.number || 'singular';
+  speechRate.value = q.speechRate || 0.8; // 👈 載入語速
+
   relativeSentence.value = q.grammarFeature.relative.label; prepositionSentence.value = q.grammarFeature.preposition.label;
   tagsInput.value = q.tags?.join(', ') || ''; distractorsInput.value = q.grammarFeature.relative.distractors?.join(', ') || '';
   explanationTitle.value = q.explanation?.title || ''; explanationDesc.value = q.explanation?.desc || '';
@@ -135,11 +137,9 @@ const processImage = (file: File, target: 'noun' | 'distractor' | 'modifier') =>
       canvas.width = width; canvas.height = height;
       const ctx = canvas.getContext('2d'); ctx?.drawImage(img, 0, 0, width, height);
       const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
-
       if (target === 'noun') imageUrl.value = compressedBase64;
       else if (target === 'distractor') distractorImageUrl.value = compressedBase64;
       else modifierImageUrl.value = compressedBase64;
-
       activeUploadTarget.value = null;
     };
     img.src = e.target?.result as string;
@@ -161,12 +161,7 @@ const generateTiles = (sentence: string) => {
 const saveQuestion = () => {
   if (!targetNoun.value) { alert('請填寫目標名詞！'); return; }
   if (questionType.value !== 'chunk' && !relativeSentence.value) { alert('請填寫關係子句！'); return; }
-
-  // 強制檢查：避免系統塞假圖
-  if (!imageUrl.value || imageUrl.value.includes('dicebear.com')) {
-    alert('請務必上傳真實的「主要圖片」！系統不接受預設隨機頭像。');
-    return;
-  }
+  if (!imageUrl.value || imageUrl.value.includes('dicebear.com')) { alert('請務必上傳真實的「主要圖片」！'); return; }
 
   const relCorrect = generateTiles(relativeSentence.value || '');
   let distractors = distractorsInput.value.split(/[,，\s]+/).filter(Boolean);
@@ -184,9 +179,10 @@ const saveQuestion = () => {
     id: editingId.value || `q_${Date.now()}`,
     type: questionType.value, mode: questionMode.value, enabledStages: enabledStages.value,
     targetNoun: targetNoun.value,
-    antecedent: { noun: targetNoun.value, number: targetNoun.value.toLowerCase().includes('girl') || targetNoun.value.toLowerCase().includes('boy') ? 'singular' : 'plural', person: 'person' },
+    antecedent: { noun: targetNoun.value, number: antecedentNumber.value, person: targetNoun.value.toLowerCase().includes('cat') || targetNoun.value.toLowerCase().includes('pin') || targetNoun.value.toLowerCase().includes('table') ? 'thing' : 'person' },
     imageUrl: imageUrl.value,
     tags: tagsInput.value.split(/[,，\s]+/).filter(Boolean),
+    speechRate: speechRate.value, // 👈 存入語速
     grammarFeature: {
       relative: { label: relativeSentence.value || '', tiles: finalTiles, correctAnswer: relCorrect, distractors },
       preposition: { label: prepositionSentence.value || '', tiles: prepTiles, correctAnswer: prepCorrect }
@@ -232,7 +228,6 @@ const saveQuestion = () => {
   if (questionType.value === 'chunk' || (chunkZhInput.value && questionType.value === 'standard')) {
     const chunkMatch = relativeSentence.value.match(/\[([^\]]+)\]/);
     const chunkText = chunkMatch ? chunkMatch[1] : relativeSentence.value;
-
     let quizOpts = chunkQuizInput.value.split(/[,，]/).map(s => s.trim()).filter(Boolean);
     if (quizOpts.length === 0) quizOpts = ['look for it', 'look at it'];
 
@@ -327,6 +322,17 @@ const saveAllAndClose = () => {
               </div>
             </div>
 
+            <!-- 👈 新增：語速設定 -->
+            <div class="form-group">
+              <label>TTS 語音速度</label>
+              <div class="type-switcher">
+                <button :class="{ active: speechRate === 0.5 }" @click="speechRate = 0.5">🐢 慢速 (0.5)</button>
+                <button :class="{ active: speechRate === 0.8 }" @click="speechRate = 0.8">🚶 適中 (0.8)</button>
+                <button :class="{ active: speechRate === 1.0 }" @click="speechRate = 1.0">🏃 正常 (1.0)</button>
+              </div>
+            </div>
+
+            <!-- 以下省略中間的表單內容，保持你原本的即可 -->
             <div class="form-group" v-if="questionType === 'standard'">
               <label>題目模式</label>
               <div class="type-switcher">
@@ -353,7 +359,6 @@ const saveAllAndClose = () => {
               </div>
             </template>
 
-            <!-- 👈 核心修改：將主圖片上傳區移出，讓三種題型都能看到 -->
             <div class="form-group">
               <label>
                 {{ questionType === 'contrast' ? '名詞圖片 (拼圖右側)'
@@ -368,7 +373,6 @@ const saveAllAndClose = () => {
               <input ref="fileInput" type="file" accept="image/*" style="display: none" @change="handleFileChange" />
             </div>
 
-            <!-- 只有標準題與對比題才需要以下圖片 -->
             <template v-if="questionType !== 'chunk'">
               <div class="form-group" v-if="questionType === 'standard'">
                 <label>干擾圖片 (選填，聽力測驗的錯誤選項圖)</label>
@@ -401,6 +405,16 @@ const saveAllAndClose = () => {
               <div class="form-group">
                 <label>心智圖標籤 (Tags)</label>
                 <input v-model="tagsInput" type="text" placeholder="Ex: 穿著與顏色" @focus="activeUploadTarget = null" />
+              </div>
+            </div>
+
+            <div class="form-group" v-if="questionType !== 'chunk'">
+              <label>先行詞單複數 (影響動詞一致性判斷)</label>
+              <div class="type-switcher">
+                <button :class="{ active: antecedentNumber === 'singular' }" @click="antecedentNumber = 'singular'">單數
+                  (Singular)</button>
+                <button :class="{ active: antecedentNumber === 'plural' }" @click="antecedentNumber = 'plural'">複數
+                  (Plural)</button>
               </div>
             </div>
 

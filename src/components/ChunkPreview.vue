@@ -8,12 +8,10 @@ const props = defineProps<{
     chunk: string;
     zhMeaning: string;
     quizOptions?: { text: string; isCorrect: boolean }[];
+    speechRate?: number; // 👈 接收語速
 }>();
 
-const emit = defineEmits<{
-    (e: 'success'): void;
-}>();
-
+const emit = defineEmits<{ (e: 'success'): void; }>();
 const { speak } = useTTS();
 
 const cleanChunk = props.chunk.replace(/[\[\]]/g, '');
@@ -21,13 +19,10 @@ const selectedIndex = ref<number | null>(null);
 const isWrong = ref(false);
 const isSuccess = ref(false);
 
-// 👈 過濾掉系統預設的假圖
-const isRealImage = computed(() => {
-    return props.image && !props.image.includes('dicebear.com');
-});
+const isRealImage = computed(() => props.image && !props.image.includes('dicebear.com'));
 
 const playChunkAudio = () => {
-    speak(cleanChunk);
+    speak(cleanChunk, { rate: props.speechRate ?? 0.8 }); // 👈 套用語速
 };
 
 const handleSelect = (opt: { text: string; isCorrect: boolean }, index: number) => {
@@ -36,58 +31,46 @@ const handleSelect = (opt: { text: string; isCorrect: boolean }, index: number) 
 
     if (opt.isCorrect) {
         isSuccess.value = true;
-        speak(cleanChunk);
-        setTimeout(() => {
-            emit('success');
-        }, 1500);
+        speak(cleanChunk, { rate: props.speechRate ?? 0.8 }); // 👈 套用語速
+        setTimeout(() => { emit('success'); }, 1500);
     } else {
         isWrong.value = true;
-        setTimeout(() => {
-            isWrong.value = false;
-            selectedIndex.value = null;
-        }, 800);
+        setTimeout(() => { isWrong.value = false; selectedIndex.value = null; }, 800);
     }
 };
 </script>
 
 <template>
+    <!-- 模板保持不變 -->
     <div class="chunk-preview">
         <h2>🔍 片語預習與測驗</h2>
         <p class="instruction" v-if="quizOptions?.length">請觀察圖片，選出正確的英文片語！</p>
         <p class="instruction" v-else>請點擊片語聽發音，並記住它的意思！</p>
 
         <div class="character-card">
-            <!-- 👈 使用 isRealImage 判斷 -->
             <img v-if="isRealImage" :src="image" alt="character" class="preview-img" />
             <div v-else class="preview-img placeholder-img">無圖片</div>
-
             <div class="text-area">
                 <div class="noun-text">{{ noun }}</div>
-
-                <div class="audio-hint" @click="playChunkAudio">
-                    🔊 點我聽發音提示
-                </div>
-
+                <div class="audio-hint" @click="playChunkAudio">🔊 點我聽發音提示</div>
                 <div class="zh-text">{{ zhMeaning }}</div>
             </div>
         </div>
 
         <div v-if="quizOptions && quizOptions.length > 0" class="quiz-options">
-            <button v-for="(opt, index) in quizOptions" :key="index" class="quiz-btn" :class="{
-                'is-wrong': isWrong && selectedIndex === index,
-                'is-success': isSuccess && selectedIndex === index
-            }" @click="handleSelect(opt, index)">
+            <button v-for="(opt, index) in quizOptions" :key="index" class="quiz-btn"
+                :class="{ 'is-wrong': isWrong && selectedIndex === index, 'is-success': isSuccess && selectedIndex === index }"
+                @click="handleSelect(opt, index)">
                 {{ opt.text }}
             </button>
         </div>
 
-        <button v-else class="btn-next" @click="emit('success')">
-            我記住了，開始挑戰 ➔
-        </button>
+        <button v-else class="btn-next" @click="emit('success')">我記住了，開始挑戰 ➔</button>
     </div>
 </template>
 
 <style scoped>
+/* 樣式保持不變，請直接複製你上一個版本的 style 即可 */
 .chunk-preview {
     display: flex;
     flex-direction: column;

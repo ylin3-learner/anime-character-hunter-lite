@@ -2,22 +2,23 @@ import { ref } from 'vue';
 
 // ── 1. TTS 文字轉語音 ──
 export function useTTS() {
-  const speak = (text: string, rate: number = 0.85) => {
-    if (!('speechSynthesis' in window)) {
-      console.warn('瀏覽器不支援 TTS');
-      return;
+  const isSpeaking = ref(false);
+
+  const speak = (text: string, options?: { rate?: number; pitch?: number }) => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'en-US';
+      utterance.rate = options?.rate ?? 0.8; 
+      utterance.pitch = options?.pitch ?? 1;
+      utterance.onstart = () => { isSpeaking.value = true; };
+      utterance.onend = () => { isSpeaking.value = false; };
+      utterance.onerror = () => { isSpeaking.value = false; };
+      window.speechSynthesis.speak(utterance);
     }
-    window.speechSynthesis.cancel();
-
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'en-US';
-    utterance.rate = rate; // 👈 套用傳入的倍速
-    utterance.pitch = 1.0;
-
-    window.speechSynthesis.speak(utterance);
   };
 
-  return { speak };
+  return { speak, isSpeaking };
 }
 
 // ── 2. 語音辨識 (STT) ──
