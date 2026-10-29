@@ -1,6 +1,3 @@
-### 2. `README.zh-TW.md` (繁體中文版)
-
-```markdown
 # 🕵️ Anime Character Hunter Lite（動漫角色大搜尋）
 
 **[English](README.md) | [繁體中文](README.zh-TW.md)**
@@ -31,7 +28,7 @@ flowchart TD
     
     subgraph Practice ["2. 空間與形式"]
         Macro["🧩 巨觀拖拉<br>建立後位修飾空間感"]
-        Micro["🧱 字磚重組<br>系統偵測文法迷思"]
+        Micro["🧱 減法垃圾桶 (Trash Can)<br>視覺化文法迷思與 Gap"]
         Macro --> Micro
     end
 
@@ -53,8 +50,8 @@ flowchart TD
 ```
 
 1. **片語預習與測驗 (Chunk Phrase Quiz)**：學生看圖聽發音，從相似片語中選出正確的。
-2. **空間建構 (Contrast Puzzle)**：學生親手把拼圖塊拖過中線，建立英文後位修飾的空間語序感。
-3. **標準題 (Standard Question)**：包含聽力輸入、聚焦形式、語音輸出與意識提升。
+2. **空間建構 (Macro Drag)**：學生親手把「無文字標籤」的圖片塊拖過中線，建立英文後位修飾的空間語序感。
+3. **標準題與轉換題 (Standard & Reduce)**：包含聽力輸入、聚焦形式（使用獨創的**減法垃圾桶**機制）、語音輸出與意識提升。
 
 ---
 
@@ -74,14 +71,16 @@ graph TD
             Focus["👁️ useFocusMonitor<br>(防切屏監控)"]
             Sound["🔊 useSound<br>(Web Audio 音效)"]
             Speech["🗣️ useSpeech<br>(跨平台語音代理)"]
+            Sync["📡 useClassroomSync<br>(即時主從同步)"]
         end
     end
 
     subgraph Supabase ["Supabase 雲端後端"]
-        DB[("PostgreSQL<br>(題庫與學習軌跡)")]
+        DB[("PostgreSQL<br>(題庫、軌跡、課堂狀態)")]
         Storage[("Storage<br>(圖片與音檔快取)")]
         
         subgraph EdgeFunctions ["Edge Functions (Deno)"]
+            Action_Proxy["teacher-action<br>(安全驗證與發送)"]
             TTS_Proxy["deepgram-tts<br>(Deepgram TTS)"]
             STT_Proxy["edge-stt<br>(Deepgram STT)"]
         end
@@ -92,9 +91,13 @@ graph TD
     end
 
     %% 資料流
-    AdminUI -- "發送指令 / 同步題庫" --> StudentUI
-    StudentUI -- "CRUD 題目/軌跡" --> DB
-    AdminUI -- "CRUD 題目" --> DB
+    AdminUI -- "安全驗證請求" --> Action_Proxy
+    Action_Proxy -- "更新狀態" --> DB
+    DB -- "Postgres Changes" --> Sync
+    Sync -- "推送與同步" --> StudentUI
+    
+    AdminUI -- "CRUD" --> DB
+    StudentUI -- "CRUD & Logs" --> DB
     
     StudentUI -- "語音合成請求" --> TTS_Proxy
     TTS_Proxy --> Deepgram
@@ -119,39 +122,36 @@ graph TD
 
 ---
 
-## ⚡ 即時課堂互動時序圖 (Real-time Classroom Flow)
+## ⚡ 即時課堂互動時序圖 (Master-Slave & Anti-Cheat)
 
-這張圖展示了最核心的「教師掌控」與「學生防作弊」機制，包含靜默同步與強制重置計時器。
+這張圖展示了最核心的「教師安全掌控」、「靜默同步」與「學生防作弊」機制。
 
 ```mermaid
 sequenceDiagram
     participant T as 👩‍🏫 老師
-    participant A as 🖥️ App 狀態
-    participant Timer as ⏱️ 計時引擎
+    participant EF as 🛡️ Edge Function
+    participant DB as 🗄️ 資料庫狀態
     participant S as 👨‍🎓 學生畫面
+    participant Timer as ⏱️ 計時引擎
     participant Browser as 🌐 瀏覽器 API
 
-    Note over T,S: 情境：老師在後台將題目改為 60 秒，並點擊發送
+    Note over T,S: 情境：老師安全地推送 60 秒限時題目
     
-    T->>T: 修改秒數 (90s -> 60s)
-    T->>T: 點擊「🚀 發送給全班」
-    T->>A: 1. Emit 'sync-local' (靜默更新)
-    T->>A: 2. Emit 'push' (發送題目 ID)
-    
-    A->>A: 替換 questionBank 為最新狀態
-    A->>A: currentIndex 切換至目標題目
-    A->>Timer: 3. 強制啟動 startTimer(60)
-    Timer-->>S: 畫面顯示倒數 60 秒
+    T->>EF: 請求發送 (附帶教師密碼)
+    EF->>DB: 驗證並更新狀態 (題目 ID + 結束時間)
+    DB-->>S: Postgres Changes 觸發 (WebSocket)
+    S->>S: 切換題目並同步題庫
+    S->>Timer: 計算剩餘絕對時間
+    Timer-->>S: 顯示 60 秒倒數
 
     Note over S,Browser: 情境：學生試圖切換分頁偷看答案
     
-    Browser->>A: 觸發 visibilitychange (分頁隱藏)
-    A->>A: 觸發 handleDistracted()
-    A->>S: 播放尖銳 Beep 聲 + 顯示紅框警告
+    Browser->>S: 觸發 visibilitychange (分頁隱藏)
+    S->>S: 播放防作弊 Beep 聲 + 顯示紅框警告
     Note right of Timer: ⚠️ 絕對時間戳持續倒數<br>切換分頁無法暫停時間
     
-    Timer-->>S: 時間到！觸發 isTimeUp = true
-    A->>S: 顯示超時阻塞遮罩，強制中斷作答
+    Timer-->>S: 時間到！觸發 isTimeUp
+    S->>S: 顯示超時阻塞遮罩
 ```
 
 ---
@@ -159,14 +159,17 @@ sequenceDiagram
 ## ✨ 主要功能
 
 ### 給學生
+- **減法垃圾桶 UI（Reduce 模式）**：學生一開始看到完整的關係子句，點擊多餘的詞（如 `who`, `is`）丟進垃圾桶。視覺化看著句子縮短，親眼見證文法轉換的過程。
 - **片語塊視覺化**：多字片語（如 `[in a blue uniform]`）顯示為不可分割的藍色磚塊。
+- **無標籤空間拼圖**：巨觀拖拉階段只顯示圖片，不顯示文字，避免洩題。
 - **隨機語音輸入**：每次播放皆會從語音池中隨機選擇不同聲音，增加聽力豐富度。
-- **即時引導式回饋**：文法錯誤時以紅字標示並搖晃。
 - **文字比對發音面板**：透過 Deepgram 辨識發音，精準畫線標示漏讀單字。
 
 ### 給老師（Teacher Admin）
-- **三大獨立題型**：標準題、對比題、片語題。
-- **課堂節奏掌控**：可針對每題切換「自由進度」(🟢) 或「限時挑戰」(🔴)，並能一鍵將特定題目推送到全班。
+- **漏斗式出題（Funnel Authoring）**：用 `[ ]` 框出要保留的片語，系統自動視覺化「保留（綠）」與「丟棄（紅）」的字。若動詞需轉為介系詞（如 `carrying` 改 `with`），只需在綠框加上 `with`，系統會自動把新字塞進學生的字磚庫。
+- **主從遠端控制**：老師可一鍵推送題目、強制重置計時器，或隨時點擊 `+30s` 為全班加時。
+- **課堂節奏掌控**：可針對每題切換「自由進度」(🟢) 或「限時挑戰」(🔴)。
+- **直覺干擾磚標籤**：點擊 `she`, `wear`, `which` 等標籤，快速加入迷思干擾磚。
 - **全班分析儀表板**：將錯誤事件彙整成即時圖表。
 
 ---
@@ -190,7 +193,7 @@ sequenceDiagram
 ## 🛠️ 技術棧與工程
 
 - **前端**：Vue 3（Composition API）+ Vite + TypeScript
-- **後端與資料庫**：Supabase（PostgreSQL、Storage、Edge Functions）
+- **後端與資料庫**：Supabase（PostgreSQL、Storage、Edge Functions、Realtime）
 - **語音 (TTS & STT)**：Deepgram API（透過 Edge Function 代理）+ Web Speech API 降級備援
 - **拖曳**：原生 Pointer Events 與 `vue-draggable-plus`
 
@@ -207,14 +210,17 @@ VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 
 ### Supabase 設定
 1. 建立名為 `tts-audio` 的 **Public** Storage bucket。
-2. 部署 Edge Functions：
+2. 建立 `classroom_state` 資料表並開啟 Realtime (`supabase_realtime`)。
+3. 部署 Edge Functions：
    ```bash
    npx supabase functions deploy deepgram-tts
    npx supabase functions deploy edge-stt
+   npx supabase functions deploy teacher-action
    ```
-3. 設定 Deepgram API Key：
+4. 設定 Secrets（API 金鑰與教師密碼）：
    ```bash
    npx supabase secrets set DEEPGRAM_API_KEY=your_deepgram_key
+   npx supabase secrets set TEACHER_PASSWORD=your_teacher_password
    ```
 
 ### 開發與測試

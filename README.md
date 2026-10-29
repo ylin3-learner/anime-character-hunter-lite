@@ -12,7 +12,7 @@ It is designed around a single 45-minute lesson for **Grade 9 (115 iE5, Unit 5: 
 
 ## 🧠 The Cognitive Pipeline (Pedagogy-Driven Design)
 
-This app is built upon Second Language Acquisition (SLA) theories and features **three distinct question types**, each guiding students through a specific cognitive loop:
+This app is built upon Second Language Acquisition (SLA) theories and features **three distinct question types**, guiding students through a specific cognitive loop:
 
 ```mermaid
 flowchart TD
@@ -27,8 +27,8 @@ flowchart TD
     Input --> Macro
     
     subgraph Practice ["2. Spatial & Form"]
-        Macro["🧩 Contrast Puzzle<br>Spatial Post-modification"]
-        Micro["🧱 Micro Tiles<br>Grammar Rule Engine"]
+        Macro["🧩 Macro Drag<br>Spatial Post-modification"]
+        Micro["🧱 Subtraction UI (Trash Can)<br>Grammar Rule Engine & Visual Gap"]
         Macro --> Micro
     end
 
@@ -50,8 +50,8 @@ flowchart TD
 ```
 
 1. **Chunk Phrase Quiz (Lexical Chunking)**: Students listen and select the correct chunk to establish Form-Meaning Mapping.
-2. **Contrast Puzzle (Spatial Construction)**: Students physically drag puzzle pieces to build a spatial sense of English post-modification.
-3. **Standard Question (Input, Form, & Output)**: Features Input Processing, Focus on Form, Prosody Output (TTS/STT), and Consciousness-Raising.
+2. **Macro Drag & Contrast Puzzle (Spatial Construction)**: Students physically drag image blocks (without text labels) to build a spatial sense of English post-modification.
+3. **Standard & Reduce (Input, Form, & Output)**: Features Input Processing, Focus on Form using a unique **"Trash Can" subtraction mechanic**, Prosody Output (TTS/STT), and Consciousness-Raising.
 
 ---
 
@@ -71,14 +71,16 @@ graph TD
             Focus["👁️ useFocusMonitor<br>(Anti-Cheat)"]
             Sound["🔊 useSound<br>(Web Audio)"]
             Speech["🗣️ useSpeech<br>(Cross-Platform)"]
+            Sync["📡 useClassroomSync<br>(Realtime Master-Slave)"]
         end
     end
 
     subgraph Supabase ["Supabase Cloud Backend"]
-        DB[("PostgreSQL<br>(Questions & Logs)")]
+        DB[("PostgreSQL<br>(Questions, Logs, State)")]
         Storage[("Storage<br>(Images & TTS Cache)")]
         
         subgraph EdgeFunctions ["Edge Functions (Deno)"]
+            Action_Proxy["teacher-action<br>(Secure Push/AddTime)"]
             TTS_Proxy["deepgram-tts<br>(Deepgram TTS)"]
             STT_Proxy["edge-stt<br>(Deepgram STT)"]
         end
@@ -89,9 +91,13 @@ graph TD
     end
 
     %% Data Flow
-    AdminUI -- "Sync / Push Question" --> StudentUI
-    StudentUI -- "CRUD & Logs" --> DB
+    AdminUI -- "Secure Action Request" --> Action_Proxy
+    Action_Proxy -- "Update State" --> DB
+    DB -- "Postgres Changes" --> Sync
+    Sync -- "Push & Sync" --> StudentUI
+    
     AdminUI -- "CRUD" --> DB
+    StudentUI -- "CRUD & Logs" --> DB
     
     StudentUI -- "TTS Request" --> TTS_Proxy
     TTS_Proxy --> Deepgram
@@ -116,39 +122,36 @@ To ensure 100% stability across all devices (iPads, computers, and smart whitebo
 
 ---
 
-## ⚡ Real-time Classroom Flow (Anti-Cheat & Pacing)
+## ⚡ Real-time Classroom Flow (Master-Slave & Anti-Cheat)
 
-This sequence diagram illustrates the "Teacher Control" and "Anti-Cheat" mechanisms, including the silent sync and forced timer reset.
+This sequence diagram illustrates the "Teacher Control" (via secure Edge Function), the "Silent Sync", and the "Anti-Cheat" mechanisms.
 
 ```mermaid
 sequenceDiagram
     participant T as 👩‍🏫 Teacher
-    participant A as 🖥️ App State
-    participant Timer as ⏱️ Timer Engine
+    participant EF as 🛡️ Edge Function (teacher-action)
+    participant DB as 🗄️ Postgres (classroom_state)
     participant S as 👨‍🎓 Student View
+    participant Timer as ⏱️ Timer Engine
     participant Browser as 🌐 Browser API
 
-    Note over T,S: Scenario: Teacher sets 60s and pushes to class
+    Note over T,S: Scenario: Teacher pushes question with 60s limit
     
-    T->>T: Change time (90s -> 60s)
-    T->>T: Click "🚀 Push to Class"
-    T->>A: 1. Emit 'sync-local' (Silent Sync)
-    T->>A: 2. Emit 'push' (Target ID)
-    
-    A->>A: Update questionBank
-    A->>A: Switch currentIndex
-    A->>Timer: 3. Force startTimer(60)
+    T->>EF: Request Push (with Password)
+    EF->>DB: Validate & Update State (Question ID + EndTime)
+    DB-->>S: Postgres Changes (Realtime WebSocket)
+    S->>S: Switch currentIndex & sync questionBank
+    S->>Timer: Calculate absolute remaining time
     Timer-->>S: Display 60s countdown
 
-    Note over S,Browser: Scenario: Student tries to switch tabs
+    Note over S,Browser: Scenario: Student tries to switch tabs (Cheat)
     
-    Browser->>A: Trigger visibilitychange
-    A->>A: Handle handleDistracted()
-    A->>S: Play Beep sound + Red Overlay
-    Note right of Timer: ⚠️ Absolute timestamp keeps<br>running even if tab is hidden
+    Browser->>S: Trigger visibilitychange (Hidden)
+    S->>S: Play Anti-Cheat Beep + Red Overlay
+    Note right of Timer: ⚠️ Absolute timestamp keeps running.<br>Switching tabs cannot pause time.
     
     Timer-->>S: Time's up! isTimeUp = true
-    A->>S: Show blocking overlay
+    S->>S: Show blocking overlay
 ```
 
 ---
@@ -156,15 +159,17 @@ sequenceDiagram
 ## ✨ Key Features
 
 ### For Students
+- **Trash Can Subtraction UI (Reduce Mode)**: Instead of unscrambling from scratch, students see the complete relative clause and physically click to discard redundant words (e.g., `who`, `is`) into a trash can, visually witnessing the sentence shrink into a prepositional phrase.
 - **Phrase Chunking Visuals**: Multi-word units (e.g., `[in a blue uniform]`) appear as distinct blue tiles.
 - **Randomized Audio**: TTS randomly selects from a pool of voices to provide varied auditory input.
 - **Instant Guided Feedback**: Red highlighting and shake animations for grammar errors.
 - **Text-Diff Pronunciation Panel**: Record your voice via Deepgram STT, compare it with the target sentence, and see exactly which words were missed.
 
 ### For Teachers (Teacher Admin)
-- **Three Distinct Question Types**: Standard, Contrast, Chunk.
-- **Zero-Code Question Builder with Chunking Syntax**: Wrap phrases in `[ ]` to turn them into unbreakable tiles.
-- **Classroom Pace Control**: Toggle between "Free Pace" (🟢) and "Timed Challenge" (🔴) per question. Push specific questions to the whole class instantly.
+- **Funnel-Based Authoring (Reduce Mode)**: Wrap the core phrase in `[ ]` (e.g., `who is carrying [a dictionary]`). The system visually previews the "Kept" (green) and "Discarded" (red) words. If a verb needs to become a preposition (e.g., `carrying` -> `with`), simply edit the green box, and the system dynamically injects the new word into the student's tile bank.
+- **Master Remote Control**: A seamless Master-Slave architecture using Supabase Realtime. Teachers can push specific questions to the whole class, force-reset timers, and add time (`+30s`) instantly.
+- **Classroom Pace Control**: Toggle between "Free Pace" (🟢) and "Timed Challenge" (🔴) per question.
+- **Interactive Distractor Tags**: Quickly add misconception tiles (e.g., `she`, `wear`, `which`) with one click.
 - **Class-wide Analytics Dashboard**: Aggregates student error events into real-time bar charts.
 
 ---
@@ -188,7 +193,7 @@ Student mistakes are classified into **diagnostic codes**. The grammar rules are
 ## 🛠️ Tech Stack & Engineering
 
 - **Frontend**: Vue 3 (Composition API) + Vite + TypeScript
-- **Backend & DB**: Supabase (PostgreSQL, Storage, Edge Functions)
+- **Backend & DB**: Supabase (PostgreSQL, Storage, Edge Functions, Realtime)
 - **Speech (TTS & STT)**: Deepgram API (via Edge Function proxy) + Native Web Speech API fallback
 - **Drag & Drop**: Native Pointer Events & `vue-draggable-plus`
 
@@ -205,14 +210,17 @@ VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 
 ### Supabase Setup
 1. Create a **Public** Storage bucket named `tts-audio`.
-2. Deploy the Edge Functions:
+2. Create a table `classroom_state` and enable Realtime (`supabase_realtime`).
+3. Deploy the Edge Functions:
    ```bash
    npx supabase functions deploy deepgram-tts
    npx supabase functions deploy edge-stt
+   npx supabase functions deploy teacher-action
    ```
-3. Set the Deepgram API Key:
+4. Set the Secrets:
    ```bash
    npx supabase secrets set DEEPGRAM_API_KEY=your_deepgram_key
+   npx supabase secrets set TEACHER_PASSWORD=your_teacher_password
    ```
 
 ### Development & Testing
@@ -229,3 +237,4 @@ npm test
 - Noticing Hypothesis: Schmidt (1990)
 - PACE Model: Adair-Hauck & Donato (2002)
 - Focus on Form: Long (1991)
+
