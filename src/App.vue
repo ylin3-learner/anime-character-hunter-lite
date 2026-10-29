@@ -90,27 +90,37 @@ onMounted(async () => {
   fixAntecedentNumbers();
   checkAndSetInitialStage();
 
+  // 確保 joinRoom 被正確呼叫
   joinRoom((event, payload) => {
-    if (event === 'TEACHER_PUSH') {
-      console.log('📡 收到老師發送題目:', payload);
-      const idx = questionBank.value.findIndex(q => q.id === payload.id);
-      if (idx !== -1) {
-        currentIndex.value = idx;
-        checkAndSetInitialStage();
+    if (event === 'SYNC_STATE') {
+      const targetId = payload.id;
+      const targetEndTime = payload.timerEndTime;
 
-        if (payload.timerEndTime) {
-          // 👈 計算剩餘秒數
-          const remaining = Math.max(0, Math.floor((payload.timerEndTime - Date.now()) / 1000));
-          startTimer(remaining);
-        } else {
-          clearTimer();
+      // 1. 檢查題目是否需要切換
+      if (targetId && currentQuestion.value.id !== targetId) {
+        console.log('📡 題目已切換至:', targetId);
+        const idx = questionBank.value.findIndex(q => q.id === targetId);
+        if (idx !== -1) {
+          currentIndex.value = idx;
+          checkAndSetInitialStage();
         }
       }
-    }
-    if (event === 'TEACHER_ADD_TIME') {
-      console.log('📡 收到老師加時:', payload);
-      const remaining = Math.max(0, Math.floor((payload.newEndTime - Date.now()) / 1000));
-      startTimer(remaining); // 直接重設為新的剩餘時間
+
+      // 2. 檢查計時器是否需要更新
+      if (targetEndTime) {
+        const remaining = Math.max(0, Math.floor((targetEndTime - Date.now()) / 1000));
+        console.log(`📡 更新計時器，剩餘秒數: ${remaining}`);
+        
+        // 👈 關鍵修正：強制將本地的題目狀態改為限時，這樣 UI 才會顯示倒數條！
+        if (currentQuestion.value) {
+          currentQuestion.value.isTimed = true;
+          currentQuestion.value.timeLimit = remaining;
+        }
+        
+        startTimer(remaining);
+      } else {
+        clearTimer();
+      }
     }
   });
 });
@@ -118,7 +128,7 @@ onMounted(async () => {
 onUnmounted(() => {
   document.removeEventListener('pointerdown', handleGlobalInteraction);
   document.removeEventListener('touchstart', handleGlobalInteraction);
-  leaveRoom(); // 👈 離開房間
+  leaveRoom(); // 離開房間
 });
 
 const fixAntecedentNumbers = () => {
@@ -236,7 +246,7 @@ const handlePushQuestion = (id: string) => {
     } else {
       clearTimer();
     }
-    
+
     // 👈 呼叫 API 發送指令，並帶上老師的驗證密碼
     const pwd = sessionStorage.getItem('admin_auth') ? 'admin123' : '';
     sendPush(targetQ, endTime, pwd);
@@ -246,13 +256,13 @@ const handlePushQuestion = (id: string) => {
 // 新增：處理加時（本地 UI 更新 + Realtime 廣播）
 const handleAddTime = (seconds: number) => {
   // 1. 本地先加
-  addTime(seconds); 
-  
+  addTime(seconds);
+
   // 2. 計算新的結束時間並廣播
   // 注意：這裡需要拿到目前計時器的剩餘時間來推算新的 endTime
   // 但最簡單的方式是：直接廣播一個新的結束時間
   const newEndTime = Date.now() + (timeLeft.value + seconds) * 1000;
-  
+
   const pwd = sessionStorage.getItem('admin_auth') ? 'admin123' : '';
   sendAddTime(newEndTime, pwd);
 };
