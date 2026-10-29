@@ -110,13 +110,13 @@ onMounted(async () => {
       if (targetEndTime) {
         const remaining = Math.max(0, Math.floor((targetEndTime - Date.now()) / 1000));
         console.log(`📡 更新計時器，剩餘秒數: ${remaining}`);
-        
+
         // 👈 關鍵修正：強制將本地的題目狀態改為限時，這樣 UI 才會顯示倒數條！
         if (currentQuestion.value) {
           currentQuestion.value.isTimed = true;
           currentQuestion.value.timeLimit = remaining;
         }
-        
+
         startTimer(remaining);
       } else {
         clearTimer();
@@ -280,6 +280,19 @@ const verifyAdmin = () => {
   } else { alert('密碼錯誤！請聯繫授課教師。'); adminPasswordInput.value = ''; }
 };
 const cancelAuth = () => { showAdminAuth.value = false; adminPasswordInput.value = ''; pendingAction.value = null; };
+const logoutAdmin = () => {
+  if (confirm('確定要登出教師模式嗎？')) {
+    // 1. 清除驗證狀態
+    isAdminAuthenticated.value = false;
+    sessionStorage.removeItem('admin_auth');
+
+    // 2. 關閉備課中心（如果有開著的話）
+    showAdmin.value = false;
+
+    // 3. (可選) 如果正在進行計時，可以決定是否要保留。通常登出不會影響學生端，所以保持原狀即可。
+    console.log('👋 [Auth] 教師已登出，交還控制權');
+  }
+};
 </script>
 
 <template>
@@ -314,7 +327,11 @@ const cancelAuth = () => { showAdminAuth.value = false; adminPasswordInput.value
       <div class="header-controls">
         <div class="progress-bar">第 {{ currentIndex + 1 }} / {{ questionBank.length }} 關</div>
         <button class="btn-finish" @click="showSummary = true">🏁 結束練習</button>
-        <button class="btn-admin" @click="openAdmin">👩‍🏫 教師備課中心</button>
+        <!-- 只有已驗證的老師才看得到備課中心與登出按鈕 -->
+        <template v-if="isAdminAuthenticated">
+          <button class="btn-admin" @click="openAdmin">👩‍🏫 教師備課中心</button>
+          <button class="btn-logout" @click="logoutAdmin">🚪 登出教師</button>
+        </template>
         <button class="btn-analytics" @click="openAnalytics">📊 數據分析</button>
       </div>
     </header>
@@ -825,5 +842,22 @@ header h1 {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+.btn-logout {
+  background: #f0f0f0;
+  color: #777;
+  border: none;
+  border-bottom: 4px solid #ccc;
+  padding: 8px 20px;
+  border-radius: 12px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.1s;
+}
+
+.btn-logout:active {
+  border-bottom-width: 0;
+  transform: translateY(4px);
 }
 </style>
