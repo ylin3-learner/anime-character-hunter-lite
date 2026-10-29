@@ -376,6 +376,11 @@ const saveAllAndClose = () => {
                       第 {{ index + 1 }} 關
                       <span class="q-type-tag" :class="q.type">{{ q.type === 'contrast' ? '對比題' : q.type === 'chunk' ?
                         '片語題' : '標準題' }}</span>
+
+                      <!-- 👈 新增：如果是標準題，顯示 Build 或 Reduce 標籤 -->
+                      <span v-if="q.type === 'standard'" class="q-mode-tag" :class="q.mode || 'build'">
+                        {{ q.mode === 'reduce' ? 'Reduce' : 'Build' }}
+                      </span>
                       <span v-if="q.isTimed" class="q-time-tag">🔴 {{ q.timeLimit || 60 }}s</span>
                       <span v-else class="q-free-tag">🟢 自由</span>
                     </div>
