@@ -4,18 +4,13 @@ let isTTSUnlocked = false;
 let globalVoices: SpeechSynthesisVoice[] = [];
 let currentAudio: HTMLAudioElement | null = null;
 
-// 👈 定義公認高品質的語音包關鍵字 (跨平台：iOS, macOS, Windows, Chrome)
-const HIGH_QUALITY_VOICES = [
-  // Apple (iOS / macOS) - Siri 等級的高品質語音
-  'Samantha', 'Alex', 'Daniel', 'Karen', 'Moira', 'Tessa', 'Rishi',
-  // Google (Chrome) - Google 的神經網路語音
-  'Google US English', 'Google UK English',
-  // Microsoft (Edge / Windows 11 自然語音)
-  'Aria', 'Guy', 'Jenny', 'Christopher', 'Natural'
+// 👈 定義 Deepgram Aura-2 的高品質語音池
+const DEEPGRAM_VOICES = [
+  'aura-2-thalia-en',    // 女聲，清晰活潑
+  'aura-2-arcas-en',     // 男聲，自然流暢
+  'aura-2-helena-en',    // 女聲，親切溫柔
+  'aura-2-apollo-en'     // 男聲，自信沉穩
 ];
-
-// 用來過濾低品質、機械音的關鍵字 (例如舊版的 Zira, David 等)
-const BAD_VOICE_KEYWORDS = ['compact', 'robot', 'Zira', 'David', 'Mark'];
 
 const loadVoices = () => {
   if ('speechSynthesis' in window) {
@@ -43,59 +38,52 @@ export function useTTS() {
 
   const speak = async (text: string, options?: { rate?: number }) => {
     const rate = options?.rate ?? 0.8;
-    const forceEdge = window.location.search.includes('forceEdge=1');
 
-    // 1. 取得所有英文語音包
+    // 👈 檢查網址是否帶有 forceTTS=1 或 forceEdge=1 (兩者皆可)
+    const forceCloudTTS = window.location.search.includes('forceTTS=1') || window.location.search.includes('forceEdge=1');
     const enVoices = globalVoices.filter(v => v.lang.toLowerCase().includes('en'));
 
-    // 2. 👈 過濾出「高品質」的語音包
-    let premiumVoices = enVoices.filter(voice => {
-      const name = voice.name;
-      // 必須符合白名單關鍵字，且不能包含黑名單的爛語音關鍵字
-      const isHighQuality = HIGH_QUALITY_VOICES.some(keyword => name.includes(keyword));
-      const isBadQuality = BAD_VOICE_KEYWORDS.some(keyword => name.includes(keyword));
-      return isHighQuality && !isBadQuality;
-    });
-
-    // 如果過濾後為空，就退而求其次用所有的英文語音包
-    if (premiumVoices.length === 0) {
-      premiumVoices = enVoices;
-    }
-
-    // 3. 判斷走原生還是強制走雲端 (除錯用)
-    if (premiumVoices.length > 0 && !forceEdge) {
-      // 👈 情況 A：走本機原生高品質語音 (平板/電腦)
+    if (enVoices.length > 0 && !forceCloudTTS) {
+      // 👈 情況 A：系統原生 TTS (平板/一般電腦)
+      console.log('[TTS] 使用系統原生語音');
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'en-US';
       utterance.rate = rate;
 
-      // 隨機挑選一個高品質語音包
-      const randomVoice = premiumVoices[Math.floor(Math.random() * premiumVoices.length)];
+      const randomVoice = enVoices[Math.floor(Math.random() * enVoices.length)];
       utterance.voice = randomVoice;
-
-      console.log(`[TTS] 使用原生高品質語音: ${randomVoice.name}`);
 
       utterance.onstart = () => { isSpeaking.value = true; };
       utterance.onend = () => { isSpeaking.value = false; };
       window.speechSynthesis.speak(utterance);
     } else {
-      // 情況 B：強制走 Edge/Azure TTS 代理 (測試用)
-      console.log('[TTS] 呼叫雲端 TTS 代理...');
+      // 👈 情況 B：Deepgram 雲端 TTS (智慧白板 或 強制測試)
+      if (forceCloudTTS) {
+        console.log('[TTS] 🚨 網址帶有強制參數，無視原生語音，強制走 Deepgram TTS...');
+      } else {
+        console.log('[TTS] 系統無語音包，呼叫 Deepgram TTS...');
+      }
+
       isSpeaking.value = true;
 
       try {
         const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-        // 雲端代理的語音池 (直接指定微軟的高品質神經網路語音)
-        const edgeVoices = [
-          'en-US-AriaNeural', 'en-US-GuyNeural', 'en-US-JennyNeural', 'en-US-ChristopherNeural'
-        ];
-        const randomEdgeVoice = edgeVoices[Math.floor(Math.random() * edgeVoices.length)];
+        const randomVoice = DEEPGRAM_VOICES[Math.floor(Math.random() * DEEPGRAM_VOICES.length)];
 
-        const res = await fetch(`${supabaseUrl}/functions/v1/edge-tts`, {
+        // Deepgram 的 speed 限制為 0.7 ~ 1.5
+        const deepgramSpeed = Math.max(0.7, Math.min(1.5, rate));
+
+        console.log(`[TTS] 語音: ${randomVoice}, 原始語速: ${rate}, 實際傳送語速: ${deepgramSpeed}`);
+
+        const res = await fetch(`${supabaseUrl}/functions/v1/deepgram-tts`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text, rate: rate.toString(), voice: randomEdgeVoice })
+          body: JSON.stringify({
+            text,
+            voice: randomVoice,
+            speed: deepgramSpeed
+          })
         });
 
         if (!res.ok) {
@@ -103,20 +91,31 @@ export function useTTS() {
           throw new Error(`HTTP ${res.status}: ${errText}`);
         }
 
-        const data = await res.json();
+        // 👈 關鍵：接收二進位音訊，轉成 Blob 播放
+        const audioBuffer = await res.arrayBuffer();
+        const blob = new Blob([audioBuffer], { type: 'audio/mpeg' });
+        const audioUrl = URL.createObjectURL(blob);
 
-        if (data.url) {
-          if (currentAudio) currentAudio.pause();
-          currentAudio = new Audio(data.url);
-          currentAudio.playbackRate = rate;
-          currentAudio.onended = () => { isSpeaking.value = false; };
-          currentAudio.onerror = () => { isSpeaking.value = false; console.error('[TTS] 音檔播放失敗'); };
-          await currentAudio.play();
-        } else {
-          throw new Error(data.error || '取得音檔失敗 (無 URL)');
-        }
+        if (currentAudio) currentAudio.pause();
+        currentAudio = new Audio(audioUrl);
+
+        // 雖然後端已經處理了變速，這裡再設一次作為雙重保險
+        currentAudio.playbackRate = 1.0;
+
+        currentAudio.onended = () => {
+          isSpeaking.value = false;
+          URL.revokeObjectURL(audioUrl); // 釋放記憶體
+        };
+        currentAudio.onerror = () => {
+          isSpeaking.value = false;
+          console.error('[TTS] 音檔播放失敗');
+        };
+
+        await currentAudio.play();
+        console.log('[TTS] Deepgram TTS 播放成功');
+
       } catch (error: any) {
-        console.error(`[TTS] 雲端 TTS 失敗: ${error.message || error}`);
+        console.error(`[TTS] Deepgram TTS 失敗: ${error.message || error}`);
         isSpeaking.value = false;
       }
     }
@@ -125,7 +124,7 @@ export function useTTS() {
   return { speak, isSpeaking };
 }
 
-// (保留原本的 useSpeechRecognition 邏輯)
+// ... 保留原本的 useSpeechRecognition (略，請貼上你原本的即可) ...
 export function useSpeechRecognition() {
   const isListening = ref(false);
   const transcript = ref('');
