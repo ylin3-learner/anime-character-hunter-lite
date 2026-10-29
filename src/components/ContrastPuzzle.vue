@@ -132,13 +132,10 @@ const continueToNext = () => {
   emit('success');
 };
 
-// 👈 自動解析 Markdown 語法
 const formattedDesc = computed(() => {
   if (!props.explanationDesc) return '';
   let text = props.explanationDesc;
-  // 將 **文字** 轉為粗體
   text = text.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
-  // 將 ==文字== 轉為高亮
   text = text.replace(/==(.*?)==/g, '<span class="hl">$1</span>');
   return text;
 });
@@ -173,12 +170,15 @@ const formattedDesc = computed(() => {
             :style="{ left: `${modifierX}px`, top: `${modifierY}px`, transition: draggingType === 'modifier' ? 'none' : 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)', zIndex: draggingType === 'modifier' ? 10 : 2 }"
             @pointerdown="startDrag($event, 'modifier')">
             <img :src="modifierImage" alt="modifier" draggable="false" />
+            <div class="piece-label">{{ modifierLabel }}</div>
           </div>
+
           <div class="puzzle-piece"
             :class="{ 'dragging': draggingType === 'noun', 'in-slot': nounSlot !== null, 'wrong-piece': isWrong }"
             :style="{ left: `${nounX}px`, top: `${nounY}px`, transition: draggingType === 'noun' ? 'none' : 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)', zIndex: draggingType === 'noun' ? 10 : 1 }"
             @pointerdown="startDrag($event, 'noun')">
             <img :src="nounImage" alt="noun" draggable="false" />
+            <div class="piece-label">{{ englishNoun }}</div>
           </div>
         </div>
       </div>
@@ -191,7 +191,6 @@ const formattedDesc = computed(() => {
       <Transition name="pop-up">
         <div v-if="showExplanation" class="explanation-card">
           <h3 v-if="explanationTitle">{{ explanationTitle }}</h3>
-          <!-- 使用 formattedDesc 與 v-html -->
           <p v-if="explanationDesc" class="explanation-text" v-html="formattedDesc"></p>
 
           <div class="english-sentence">
@@ -257,7 +256,8 @@ const formattedDesc = computed(() => {
 .puzzle-board {
   position: relative;
   width: 640px;
-  height: 160px;
+  height: 180px;
+  /* 👈 加高以容納圖片與文字 */
   flex-shrink: 0;
 }
 
@@ -276,7 +276,8 @@ const formattedDesc = computed(() => {
   position: absolute;
   top: 10px;
   width: 140px;
-  height: 140px;
+  height: 160px;
+  /* 👈 配合 puzzle-piece 高度 */
   border: 4px dashed #ccc;
   border-radius: 16px;
   background: #fafafa;
@@ -285,6 +286,7 @@ const formattedDesc = computed(() => {
   align-items: center;
   transition: all 0.2s;
   z-index: 1;
+  box-sizing: border-box;
 }
 
 .slot.hover {
@@ -313,7 +315,8 @@ const formattedDesc = computed(() => {
   position: absolute;
   top: 10px;
   width: 140px;
-  height: 140px;
+  height: 160px;
+  /* 👈 增加高度 */
   overflow: hidden;
   background: #ffffff;
   border: 4px solid #1cb0f6;
@@ -321,6 +324,9 @@ const formattedDesc = computed(() => {
   border-radius: 16px;
   touch-action: none;
   cursor: grab;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
 }
 
 .puzzle-piece:active {
@@ -337,11 +343,39 @@ const formattedDesc = computed(() => {
   box-shadow: 0 0 0 4px rgba(255, 75, 75, 0.2);
 }
 
+/* 👈 修正：給圖片固定高度，確保文字不被擠出 */
 .puzzle-piece img {
   width: 100%;
-  height: 100%;
+  height: 110px;
   object-fit: cover;
   pointer-events: none;
+  flex-shrink: 0;
+}
+
+/* 👈 修正：文字標籤樣式 */
+.piece-label {
+  height: 42px;
+  width: 100%;
+  background: #f0f8ff;
+  color: #1cb0f6;
+  font-size: 0.85rem;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0 6px;
+  line-height: 1.2;
+  border-top: 2px solid #1cb0f6;
+  pointer-events: none;
+  word-break: break-word;
+  flex-shrink: 0;
+}
+
+.puzzle-piece.in-slot .piece-label {
+  background: #f0fff0;
+  color: #58cc02;
+  border-top-color: #58cc02;
 }
 
 .shake {
@@ -378,7 +412,6 @@ const formattedDesc = computed(() => {
   margin-bottom: 12px;
 }
 
-/* 👈 方案一：極簡低調風（減少色彩干擾） */
 .explanation-text {
   color: #555;
   font-size: 1.1rem;
@@ -386,13 +419,11 @@ const formattedDesc = computed(() => {
   line-height: 1.6;
 }
 
-/* 加粗樣式：保留原本的文字顏色，只加粗 */
 .explanation-text :deep(b) {
   color: #333;
   font-weight: 800;
 }
 
-/* 高亮樣式：淺灰底、黑字 */
 .explanation-text :deep(.hl) {
   background-color: #f0f0f0;
   color: #333;
