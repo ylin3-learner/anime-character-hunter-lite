@@ -42,16 +42,26 @@ flowchart TD
 
     Noticing --> End((Finish))
 
-    %% Behaviorism Feedback
+    %% Behaviorism & Classroom Management
     Focus["⚠️ Anti-Cheat Beep"] -.-> Practice
     Timer["⏱️ Time Pressure"] -.-> Practice
     Data["📊 Error Tracking"] -.-> Teacher((Teacher Dashboard))
     Micro -.-> Data
+
+    subgraph ClassroomMgmt ["🎓 Classroom Management (New)"]
+        ClassMode["🔒 Class Mode<br>Lock student progression"]
+        Presence["📊 Presence Tracking<br>Live completed count"]
+        SelfPace["🟢 Self-Paced Mode<br>Free progression"]
+    end
+
+    ClassMode -.-> Practice
+    Presence -.-> Teacher
+    SelfPace -.-> Practice
 ```
 
-1. **Chunk Phrase Quiz (Lexical Chunking)**: Students listen and select the correct chunk to establish Form-Meaning Mapping.
-2. **Macro Drag & Contrast Puzzle (Spatial Construction)**: Students physically drag image blocks (without text labels) to build a spatial sense of English post-modification.
-3. **Standard & Reduce (Input, Form, & Output)**: Features Input Processing, Focus on Form using a unique **"Trash Can" subtraction mechanic**, Prosody Output (TTS/STT), and Consciousness-Raising.
+1. **Chunk Phrase Quiz**: Establishes Form-Meaning Mapping.
+2. **Macro Drag & Contrast Puzzle**: Builds a spatial sense of English post-modification (no text labels to prevent answer leaking).
+3. **Standard & Reduce**: Features Input Processing, Focus on Form using a unique **"Trash Can" subtraction mechanic**, Prosody Output, and Consciousness-Raising.
 
 ---
 
@@ -71,16 +81,17 @@ graph TD
             Focus["👁️ useFocusMonitor<br>(Anti-Cheat)"]
             Sound["🔊 useSound<br>(Web Audio)"]
             Speech["🗣️ useSpeech<br>(Cross-Platform)"]
-            Sync["📡 useClassroomSync<br>(Realtime Master-Slave)"]
+            Sync["📡 useClassroomSync<br>(State Sync & Presence)"]
         end
     end
 
     subgraph Supabase ["Supabase Cloud Backend"]
         DB[("PostgreSQL<br>(Questions, Logs, State)")]
+        Realtime[("Realtime WebSocket<br>(Postgres Changes & Presence)")]
         Storage[("Storage<br>(Images & TTS Cache)")]
         
         subgraph EdgeFunctions ["Edge Functions (Deno)"]
-            Action_Proxy["teacher-action<br>(Secure Push/AddTime)"]
+            Action_Proxy["teacher-action<br>(Validate & Update)"]
             TTS_Proxy["deepgram-tts<br>(Deepgram TTS)"]
             STT_Proxy["edge-stt<br>(Deepgram STT)"]
         end
@@ -91,10 +102,15 @@ graph TD
     end
 
     %% Data Flow
-    AdminUI -- "Secure Action Request" --> Action_Proxy
-    Action_Proxy -- "Update State" --> DB
-    DB -- "Postgres Changes" --> Sync
-    Sync -- "Push & Sync" --> StudentUI
+    AdminUI -- "1. Action Request (with Pwd)" --> Action_Proxy
+    Action_Proxy -- "2. Update State" --> DB
+    DB -- "3. Postgres Changes" --> Realtime
+    Realtime -- "4. Sync State" --> Sync
+    Sync -- "5. Update UI & Timer" --> StudentUI
+    
+    %% Presence Flow
+    StudentUI -- "Track Status (Presence)" --> Realtime
+    Realtime -- "Live Count Update" --> AdminUI
     
     AdminUI -- "CRUD" --> DB
     StudentUI -- "CRUD & Logs" --> DB
@@ -117,41 +133,47 @@ graph TD
 
 To ensure 100% stability across all devices (iPads, computers, and smart whiteboards with no system voice packs), this app implements a robust **fallback mechanism**.
 
-- **TTS (Text-to-Speech)**: Detects if the device has system voices. If yes, it randomly selects a native English voice. If no (common on Windows smart whiteboards), it routes to a Supabase Edge Function that generates high-quality neural audio via **Deepgram TTS**.
-- **STT (Speech-to-Text)**: Bypasses browser-specific API restrictions (like `service-not-allowed` on Safari) by securely sending audio through a Supabase Edge Function to **Deepgram STT**.
+- **TTS**: Detects native voices. If none, routes to **Deepgram TTS** via Supabase Edge Function.
+- **STT**: Bypasses browser restrictions by sending audio to **Deepgram STT** via Supabase Edge Function.
 
 ---
 
 ## ⚡ Real-time Classroom Flow (Master-Slave & Anti-Cheat)
 
-This sequence diagram illustrates the "Teacher Control" (via secure Edge Function), the "Silent Sync", and the "Anti-Cheat" mechanisms.
+This sequence diagram illustrates the **Class Mode Lock**, **Presence Tracking**, and **Anti-Cheat** mechanisms.
 
 ```mermaid
 sequenceDiagram
     participant T as 👩‍🏫 Teacher
-    participant EF as 🛡️ Edge Function (teacher-action)
-    participant DB as 🗄️ Postgres (classroom_state)
-    participant S as 👨‍🎓 Student View
-    participant Timer as ⏱️ Timer Engine
-    participant Browser as 🌐 Browser API
+    participant EF as 🛡️ Edge Function
+    participant RT as 📡 Realtime (Presence & DB)
+    participant S as 👨‍🎓 Student A
+    participant S2 as 👨‍🎓 Student B
 
-    Note over T,S: Scenario: Teacher pushes question with 60s limit
+    Note over T,RT: Scenario 1: Teacher enables "Class Mode" (Target: 30)
     
-    T->>EF: Request Push (with Password)
-    EF->>DB: Validate & Update State (Question ID + EndTime)
-    DB-->>S: Postgres Changes (Realtime WebSocket)
-    S->>S: Switch currentIndex & sync questionBank
-    S->>Timer: Calculate absolute remaining time
-    Timer-->>S: Display 60s countdown
+    T->>EF: Enable Class Mode & Set Target
+    EF->>RT: Update classroom_state (is_class_mode = true)
+    RT-->>S: Sync State (isClassMode = true)
+    RT-->>S2: Sync State (isClassMode = true)
 
-    Note over S,Browser: Scenario: Student tries to switch tabs (Cheat)
+    Note over S,RT: Scenario 2: Student Answers & Presence Tracking
     
-    Browser->>S: Trigger visibilitychange (Hidden)
-    S->>S: Play Anti-Cheat Beep + Red Overlay
-    Note right of Timer: ⚠️ Absolute timestamp keeps running.<br>Switching tabs cannot pause time.
+    S->>S: Complete Question (handleSuccess)
+    S->>RT: track({ status: 'completed' })
+    RT-->>T: Presence Sync (Update Completed Count: 1)
     
-    Timer-->>S: Time's up! isTimeUp = true
-    S->>S: Show blocking overlay
+    Note over S,T: Scenario 3: Class Mode Lock
+    
+    S->>S: Click "Next Question"
+    S-->>S: Button Disabled (Wait for Teacher)
+    
+    T->>EF: Click "🚀 Push to Class"
+    EF->>RT: Update Question ID
+    RT-->>S: Question switches, track({ status: 'answering' })
+    RT-->>S2: Question switches, track({ status: 'answering' })
+    
+    Note over S, Browser: Anti-Cheat: If tab is hidden, Beep + Red Overlay.
 ```
 
 ---
@@ -159,24 +181,21 @@ sequenceDiagram
 ## ✨ Key Features
 
 ### For Students
-- **Trash Can Subtraction UI (Reduce Mode)**: Instead of unscrambling from scratch, students see the complete relative clause and physically click to discard redundant words (e.g., `who`, `is`) into a trash can, visually witnessing the sentence shrink into a prepositional phrase.
-- **Phrase Chunking Visuals**: Multi-word units (e.g., `[in a blue uniform]`) appear as distinct blue tiles.
-- **Randomized Audio**: TTS randomly selects from a pool of voices to provide varied auditory input.
-- **Instant Guided Feedback**: Red highlighting and shake animations for grammar errors.
-- **Text-Diff Pronunciation Panel**: Record your voice via Deepgram STT, compare it with the target sentence, and see exactly which words were missed.
+- **Trash Can Subtraction UI (Reduce Mode)**: Students see the complete sentence and physically discard redundant words into a trash can, witnessing the sentence shrink.
+- **Class Mode Lock**: When the teacher enables Class Mode, the "Next" button is disabled. Students must wait for the teacher's push command.
+- **Phrase Chunking Visuals**: Multi-word units appear as distinct blue tiles.
+- **Randomized Audio**: TTS randomly selects from a pool of voices.
+- **Text-Diff Pronunciation Panel**: Record your voice via Deepgram STT.
 
 ### For Teachers (Teacher Admin)
-- **Funnel-Based Authoring (Reduce Mode)**: Wrap the core phrase in `[ ]` (e.g., `who is carrying [a dictionary]`). The system visually previews the "Kept" (green) and "Discarded" (red) words. If a verb needs to become a preposition (e.g., `carrying` -> `with`), simply edit the green box, and the system dynamically injects the new word into the student's tile bank.
-- **Master Remote Control**: A seamless Master-Slave architecture using Supabase Realtime. Teachers can push specific questions to the whole class, force-reset timers, and add time (`+30s`) instantly.
-- **Classroom Pace Control**: Toggle between "Free Pace" (🟢) and "Timed Challenge" (🔴) per question.
-- **Interactive Distractor Tags**: Quickly add misconception tiles (e.g., `she`, `wear`, `which`) with one click.
-- **Class-wide Analytics Dashboard**: Aggregates student error events into real-time bar charts.
+- **Presence Dashboard**: Input the target student count. Watch the live progress bar (`completed / target`) update in real-time as students finish.
+- **Class Mode Toggle**: Lock the entire class's progression instantly. Perfect for synchronized classroom teaching.
+- **Funnel-Based Authoring**: Wrap phrases in `[ ]`. Visualizes "Kept" and "Discarded" words. If a verb needs to become a preposition, edit the green box.
+- **Master Remote Control**: Push questions, force-reset timers, and add time (`+30s`) instantly.
 
 ---
 
 ## 🔬 Diagnostic Rule Engine
-
-Student mistakes are classified into **diagnostic codes**. The grammar rules are pure functions in `src/rules/grammarRules.ts`.
 
 | Code | Triggered when | What it tells the teacher |
 | :--- | :--- | :--- |
@@ -193,8 +212,8 @@ Student mistakes are classified into **diagnostic codes**. The grammar rules are
 ## 🛠️ Tech Stack & Engineering
 
 - **Frontend**: Vue 3 (Composition API) + Vite + TypeScript
-- **Backend & DB**: Supabase (PostgreSQL, Storage, Edge Functions, Realtime)
-- **Speech (TTS & STT)**: Deepgram API (via Edge Function proxy) + Native Web Speech API fallback
+- **Backend & DB**: Supabase (PostgreSQL, Storage, Edge Functions, Realtime Presence)
+- **Speech**: Deepgram API (via Edge Function proxy) + Native Web Speech API fallback
 - **Drag & Drop**: Native Pointer Events & `vue-draggable-plus`
 
 ---
@@ -229,12 +248,3 @@ npm install
 npm run dev
 npm test
 ```
-
----
-
-## 📚 Pedagogical References
-- Processing Instruction (PI): VanPatten (1996)
-- Noticing Hypothesis: Schmidt (1990)
-- PACE Model: Adair-Hauck & Donato (2002)
-- Focus on Form: Long (1991)
-

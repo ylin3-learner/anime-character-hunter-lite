@@ -1,3 +1,6 @@
+### 2. `README.zh-TW.md` (繁體中文版)
+
+```markdown
 # 🕵️ Anime Character Hunter Lite（動漫角色大搜尋）
 
 **[English](README.md) | [繁體中文](README.zh-TW.md)**
@@ -42,11 +45,21 @@ flowchart TD
 
     Noticing --> End((完成關卡))
 
-    %% 行為主義反饋
+    %% 行為主義與班級經營
     Focus["⚠️ 防切屏 Beep 聲"] -.-> Practice
     Timer["⏱️ 限時壓力"] -.-> Practice
     Data["📊 即時錯誤軌跡"] -.-> Teacher((教師數據儀表板))
     Micro -.-> Data
+
+    subgraph ClassroomMgmt ["🎓 班級經營 (全新功能)"]
+        ClassMode["🔒 上課模式<br>鎖定學生進度"]
+        Presence["📊 進度監控 (Presence)<br>即時統計完成人數"]
+        SelfPace["🟢 自學模式<br>允許自由前進"]
+    end
+
+    ClassMode -.-> Practice
+    Presence -.-> Teacher
+    SelfPace -.-> Practice
 ```
 
 1. **片語預習與測驗 (Chunk Phrase Quiz)**：學生看圖聽發音，從相似片語中選出正確的。
@@ -71,18 +84,19 @@ graph TD
             Focus["👁️ useFocusMonitor<br>(防切屏監控)"]
             Sound["🔊 useSound<br>(Web Audio 音效)"]
             Speech["🗣️ useSpeech<br>(跨平台語音代理)"]
-            Sync["📡 useClassroomSync<br>(即時主從同步)"]
+            Sync["📡 useClassroomSync<br>(狀態同步 & Presence)"]
         end
     end
 
     subgraph Supabase ["Supabase 雲端後端"]
         DB[("PostgreSQL<br>(題庫、軌跡、課堂狀態)")]
+        Realtime[("Realtime WebSocket<br>(Postgres Changes & Presence)")]
         Storage[("Storage<br>(圖片與音檔快取)")]
         
         subgraph EdgeFunctions ["Edge Functions (Deno)"]
-            Action_Proxy["teacher-action<br>(安全驗證與發送)"]
-            TTS_Proxy["deepgram-tts<br>(Deepgram TTS)"]
-            STT_Proxy["edge-stt<br>(Deepgram STT)"]
+            Action_Proxy["🛡️ teacher-action<br>(安全驗證與設定)"]
+            TTS_Proxy["🔊 deepgram-tts<br>(Deepgram TTS)"]
+            STT_Proxy["🎤 edge-stt<br>(Deepgram STT)"]
         end
     end
 
@@ -91,10 +105,15 @@ graph TD
     end
 
     %% 資料流
-    AdminUI -- "安全驗證請求" --> Action_Proxy
-    Action_Proxy -- "更新狀態" --> DB
-    DB -- "Postgres Changes" --> Sync
-    Sync -- "推送與同步" --> StudentUI
+    AdminUI -- "1. 發送指令/設定 (帶密碼)" --> Action_Proxy
+    Action_Proxy -- "2. 更新狀態" --> DB
+    DB -- "3. 觸發 Postgres Changes" --> Realtime
+    Realtime -- "4. 推送跳題/鎖定狀態" --> Sync
+    Sync -- "5. 更新 UI 與計時器" --> StudentUI
+    
+    %% Presence 流
+    StudentUI -- "作答進度 (Presence)" --> Realtime
+    Realtime -- "即時人數統計" --> AdminUI
     
     AdminUI -- "CRUD" --> DB
     StudentUI -- "CRUD & Logs" --> DB
@@ -117,41 +136,43 @@ graph TD
 
 為了確保在 iPad、一般電腦、以及**沒有語音包的智慧白板**上都能 100% 穩定運作，本專案實作了基於 Supabase Edge Functions 的降級備援機制。
 
-- **文字轉語音 (TTS)**：優先偵測系統原生語音包（並隨機選擇男女聲）。若無語音包（如 Windows 白板），則自動呼叫 `deepgram-tts` 代理，取得高音質 AI 語音。
+- **文字轉語音 (TTS)**：優先偵測系統原生語音包。若無語音包（如 Windows 白板），則自動呼叫 `deepgram-tts` 代理。
 - **語音轉文字 (STT)**：完全繞過瀏覽器 Web Speech API 的限制（如 Safari 的 `service-not-allowed`），將錄音檔傳送至 `edge-stt` 代理，交由 **Deepgram** 進行精準辨識。
 
 ---
 
-## ⚡ 即時課堂互動時序圖 (Master-Slave & Anti-Cheat)
+## ⚡ 即時課堂互動時序圖 (Master-Slave, Presence & Anti-Cheat)
 
-這張圖展示了最核心的「教師安全掌控」、「靜默同步」與「學生防作弊」機制。
+這張圖展示了最核心的「教師安全掌控」、「進度監控」與「防作弊」機制。
 
 ```mermaid
 sequenceDiagram
-    participant T as 👩‍🏫 老師
+    participant T as 👩‍🏫 老師 (Master)
     participant EF as 🛡️ Edge Function
-    participant DB as 🗄️ 資料庫狀態
-    participant S as 👨‍🎓 學生畫面
-    participant Timer as ⏱️ 計時引擎
-    participant Browser as 🌐 瀏覽器 API
+    participant RT as 📡 Realtime (Presence & DB)
+    participant S as 👨‍🎓 學生 A (Slave)
+    participant S2 as 👨‍🎓 學生 B (Slave)
 
-    Note over T,S: 情境：老師安全地推送 60 秒限時題目
-    
-    T->>EF: 請求發送 (附帶教師密碼)
-    EF->>DB: 驗證並更新狀態 (題目 ID + 結束時間)
-    DB-->>S: Postgres Changes 觸發 (WebSocket)
-    S->>S: 切換題目並同步題庫
-    S->>Timer: 計算剩餘絕對時間
-    Timer-->>S: 顯示 60 秒倒數
+    Note over T,RT: 情境一：老師開啟「上課模式」並設定目標 30 人
+    T->>EF: 開啟上課模式 (Target: 30)
+    EF->>RT: 更新 classroom_state (is_class_mode = true)
+    RT-->>S: 收到同步狀態 (isClassMode = true)
+    RT-->>S2: 收到同步狀態 (isClassMode = true)
 
-    Note over S,Browser: 情境：學生試圖切換分頁偷看答案
+    Note over S,RT: 情境二：學生作答與 Presence 進度追蹤
+    S->>S: 完成題目 (handleSuccess)
+    S->>RT: track({ status: 'completed' })
+    RT-->>T: 觸發 Presence Sync (更新完成人數: 1)
+    RT-->>S2: (學生B 還在作答，狀態維持 answering)
+
+    Note over S,T: 情境三：上課模式鎖定
+    S->>S: 點擊「下一關」
+    S-->>S: 按鈕 Disabled (等待老師發送)
     
-    Browser->>S: 觸發 visibilitychange (分頁隱藏)
-    S->>S: 播放防作弊 Beep 聲 + 顯示紅框警告
-    Note right of Timer: ⚠️ 絕對時間戳持續倒數<br>切換分頁無法暫停時間
-    
-    Timer-->>S: 時間到！觸發 isTimeUp
-    S->>S: 顯示超時阻塞遮罩
+    T->>EF: 點擊「🚀 發送」下一題
+    EF->>RT: 更新題目 ID
+    RT-->>S: 題目切換，狀態改回 answering
+    RT-->>S2: 題目切換，狀態改回 answering
 ```
 
 ---
@@ -159,18 +180,17 @@ sequenceDiagram
 ## ✨ 主要功能
 
 ### 給學生
-- **減法垃圾桶 UI（Reduce 模式）**：學生一開始看到完整的關係子句，點擊多餘的詞（如 `who`, `is`）丟進垃圾桶。視覺化看著句子縮短，親眼見證文法轉換的過程。
-- **片語塊視覺化**：多字片語（如 `[in a blue uniform]`）顯示為不可分割的藍色磚塊。
+- **減法垃圾桶 UI（Reduce 模式）**：學生點擊多餘的詞（如 `who`, `is`）丟進垃圾桶。視覺化看著句子縮短，親眼見證文法轉換的過程。
+- **上課模式鎖定 (Class Mode Lock)**：當老師開啟上課模式時，「下一關」按鈕會被禁用，學生必須等待老師統一發送指令，確保全班節奏一致。
+- **片語塊視覺化**：多字片語顯示為不可分割的藍色磚塊。
 - **無標籤空間拼圖**：巨觀拖拉階段只顯示圖片，不顯示文字，避免洩題。
-- **隨機語音輸入**：每次播放皆會從語音池中隨機選擇不同聲音，增加聽力豐富度。
 - **文字比對發音面板**：透過 Deepgram 辨識發音，精準畫線標示漏讀單字。
 
 ### 給老師（Teacher Admin）
-- **漏斗式出題（Funnel Authoring）**：用 `[ ]` 框出要保留的片語，系統自動視覺化「保留（綠）」與「丟棄（紅）」的字。若動詞需轉為介系詞（如 `carrying` 改 `with`），只需在綠框加上 `with`，系統會自動把新字塞進學生的字磚庫。
+- **進度監控面板 (Presence Dashboard)**：輸入目標人數，系統會即時統計「已完成人數」，並顯示高亮進度條（如 `5 / 30 人`），讓老師一眼掌握全班狀況。
+- **上課模式開關 (Class Mode Toggle)**：一鍵鎖定全班進度，禁止學生偷跑。
+- **漏斗式出題（Funnel Authoring）**：用 `[ ]` 框出要保留的片語，系統自動視覺化「保留」與「丟棄」的字。
 - **主從遠端控制**：老師可一鍵推送題目、強制重置計時器，或隨時點擊 `+30s` 為全班加時。
-- **課堂節奏掌控**：可針對每題切換「自由進度」(🟢) 或「限時挑戰」(🔴)。
-- **直覺干擾磚標籤**：點擊 `she`, `wear`, `which` 等標籤，快速加入迷思干擾磚。
-- **全班分析儀表板**：將錯誤事件彙整成即時圖表。
 
 ---
 
@@ -193,7 +213,7 @@ sequenceDiagram
 ## 🛠️ 技術棧與工程
 
 - **前端**：Vue 3（Composition API）+ Vite + TypeScript
-- **後端與資料庫**：Supabase（PostgreSQL、Storage、Edge Functions、Realtime）
+- **後端與資料庫**：Supabase（PostgreSQL、Storage、Edge Functions、Realtime Presence）
 - **語音 (TTS & STT)**：Deepgram API（透過 Edge Function 代理）+ Web Speech API 降級備援
 - **拖曳**：原生 Pointer Events 與 `vue-draggable-plus`
 
@@ -229,11 +249,3 @@ npm install
 npm run dev
 npm test
 ```
-
----
-
-## 📚 教學理論參考
-- 處理教學法（Processing Instruction, PI）：VanPatten (1996)
-- 注意假說（Noticing Hypothesis）：Schmidt (1990)
-- PACE 模型：Adair-Hauck & Donato (2002)
-- 聚焦形式（Focus on Form）：Long (1991)
