@@ -20,7 +20,7 @@ import { CloudDatabase } from './services/CloudDatabase';
 
 import { useQuizTimer } from './composables/useQuizTimer';
 import { useFocusMonitor } from './composables/useFocusMonitor';
-import { useClassroomSync } from './composables/useClassroomSync'; // 👈 引入 Realtime
+import { useClassroomSync } from './composables/useClassroomSync';
 
 const isDebugMode = window.location.search.includes('debug=1');
 
@@ -32,8 +32,7 @@ const questionBank = ref<QuestionData[]>([]);
 const currentStage = ref<'preview' | 'input' | 'macro' | 'micro' | 'success' | 'noticing'>('preview');
 const currentMode = ref<'relative' | 'preposition'>('relative');
 
-// 解構 Classroom Sync
-const { joinRoom, sendPush, sendAddTime, leaveRoom } = useClassroomSync();
+const { joinRoom, trackCompleted, trackAnswering, sendPush, sendAddTime, leaveRoom } = useClassroomSync();
 
 const { playSuccess, playError, playWarningBeep } = useSound();
 
@@ -43,6 +42,13 @@ const isAdminAuthenticated = ref(sessionStorage.getItem('admin_auth') === 'true'
 const sessionLog = ref<string[]>([]);
 const showSummary = ref(false);
 const completedCount = ref(0);
+
+const studentId = sessionStorage.getItem('student_uuid') || `stu_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+sessionStorage.setItem('student_uuid', studentId);
+
+const presenceCompletedCount = ref(0);
+const targetCount = ref(0);
+const isClassMode = ref(false);
 
 // ==========================================
 // 1. 防切屏與計時器邏輯
@@ -90,45 +96,46 @@ onMounted(async () => {
   fixAntecedentNumbers();
   checkAndSetInitialStage();
 
-  // 確保 joinRoom 被正確呼叫
   joinRoom((event, payload) => {
     if (event === 'SYNC_STATE') {
+      if (payload.isClassMode !== undefined) isClassMode.value = payload.isClassMode;
+      if (payload.targetCount !== undefined) targetCount.value = payload.targetCount;
+
       const targetId = payload.id;
       const targetEndTime = payload.timerEndTime;
 
-      // 1. 檢查題目是否需要切換
       if (targetId && currentQuestion.value.id !== targetId) {
         console.log('📡 題目已切換至:', targetId);
         const idx = questionBank.value.findIndex(q => q.id === targetId);
         if (idx !== -1) {
           currentIndex.value = idx;
           checkAndSetInitialStage();
+          trackAnswering();
         }
       }
 
-      // 2. 檢查計時器是否需要更新
       if (targetEndTime) {
         const remaining = Math.max(0, Math.floor((targetEndTime - Date.now()) / 1000));
-        console.log(`📡 更新計時器，剩餘秒數: ${remaining}`);
-
-        // 👈 關鍵修正：強制將本地的題目狀態改為限時，這樣 UI 才會顯示倒數條！
         if (currentQuestion.value) {
           currentQuestion.value.isTimed = true;
           currentQuestion.value.timeLimit = remaining;
         }
-
         startTimer(remaining);
       } else {
         clearTimer();
       }
     }
-  });
+
+    if (event === 'PRESENCE_SYNC') {
+      presenceCompletedCount.value = payload.completedCount;
+    }
+  }, studentId);
 });
 
 onUnmounted(() => {
   document.removeEventListener('pointerdown', handleGlobalInteraction);
   document.removeEventListener('touchstart', handleGlobalInteraction);
-  leaveRoom(); // 離開房間
+  leaveRoom();
 });
 
 const fixAntecedentNumbers = () => {
@@ -192,9 +199,20 @@ const handleInputSuccess = () => {
 };
 
 const handleUnpack = (type: 'relative' | 'preposition') => { currentMode.value = type; currentStage.value = 'micro'; };
-const handleSuccess = () => { playSuccess(); currentStage.value = 'success'; if (completedCount.value <= currentIndex.value) completedCount.value = currentIndex.value + 1; };
+
+const handleSuccess = () => {
+  playSuccess();
+  currentStage.value = 'success';
+  trackCompleted();
+  if (completedCount.value <= currentIndex.value) completedCount.value = currentIndex.value + 1;
+};
 
 const nextQuestion = () => {
+  if (isClassMode.value) {
+    alert('請等待老師統一發送下一題！');
+    return;
+  }
+  trackAnswering();
   window.speechSynthesis.cancel();
   if (currentStage.value === 'success' && getEnabledStages.value.includes('noticing') && currentQuestion.value.noticingData) { currentStage.value = 'noticing'; return; }
   if (currentIndex.value < questionBank.value.length - 1) { currentIndex.value++; checkAndSetInitialStage(); } else { showSummary.value = true; }
@@ -207,7 +225,7 @@ const handleNoticingComplete = () => {
 const restartGame = () => { currentIndex.value = 0; sessionLog.value = []; completedCount.value = 0; showSummary.value = false; checkAndSetInitialStage(); };
 
 // ==========================================
-// 4. 老師端指令處理 (Master)
+// 4. 老師端指令處理
 // ==========================================
 const updateQuestionBank = async (updatedQuestions: QuestionData[]) => {
   const currentIdx = currentIndex.value;
@@ -230,7 +248,6 @@ const handleLocalSync = (updatedQuestions: QuestionData[]) => {
   questionBank.value = updatedQuestions;
 };
 
-// 接收 TeacherAdmin 的 push 事件，並廣播給全班
 const handlePushQuestion = (id: string) => {
   const idx = questionBank.value.findIndex(q => q.id === id);
   if (idx !== -1) {
@@ -238,31 +255,22 @@ const handlePushQuestion = (id: string) => {
     currentIndex.value = idx;
     checkAndSetInitialStage();
     showAdmin.value = false;
+    trackAnswering();
 
-    let endTime = null;
     if (targetQ.isTimed && targetQ.timeLimit) {
-      endTime = Date.now() + targetQ.timeLimit * 1000;
-      startTimer(targetQ.timeLimit);
+      setTimeout(() => { startTimer(targetQ.timeLimit!); }, 150);
     } else {
       clearTimer();
     }
 
-    // 👈 呼叫 API 發送指令，並帶上老師的驗證密碼
     const pwd = sessionStorage.getItem('admin_auth') ? 'admin123' : '';
-    sendPush(targetQ, endTime, pwd);
+    sendPush(targetQ, targetQ.timeLimit ? Date.now() + targetQ.timeLimit * 1000 : null, pwd);
   }
 };
 
-// 新增：處理加時（本地 UI 更新 + Realtime 廣播）
 const handleAddTime = (seconds: number) => {
-  // 1. 本地先加
   addTime(seconds);
-
-  // 2. 計算新的結束時間並廣播
-  // 注意：這裡需要拿到目前計時器的剩餘時間來推算新的 endTime
-  // 但最簡單的方式是：直接廣播一個新的結束時間
   const newEndTime = Date.now() + (timeLeft.value + seconds) * 1000;
-
   const pwd = sessionStorage.getItem('admin_auth') ? 'admin123' : '';
   sendAddTime(newEndTime, pwd);
 };
@@ -282,15 +290,9 @@ const verifyAdmin = () => {
 const cancelAuth = () => { showAdminAuth.value = false; adminPasswordInput.value = ''; pendingAction.value = null; };
 const logoutAdmin = () => {
   if (confirm('確定要登出教師模式嗎？')) {
-    // 1. 清除驗證狀態
     isAdminAuthenticated.value = false;
     sessionStorage.removeItem('admin_auth');
-
-    // 2. 關閉備課中心（如果有開著的話）
     showAdmin.value = false;
-
-    // 3. (可選) 如果正在進行計時，可以決定是否要保留。通常登出不會影響學生端，所以保持原狀即可。
-    console.log('👋 [Auth] 教師已登出，交還控制權');
   }
 };
 </script>
@@ -322,17 +324,39 @@ const logoutAdmin = () => {
       </div>
     </Transition>
 
+    <!-- 優化後的 Header 結構 -->
     <header>
       <h1>🕵️ Anime Character Hunter</h1>
+
       <div class="header-controls">
-        <div class="progress-bar">第 {{ currentIndex + 1 }} / {{ questionBank.length }} 關</div>
-        <button class="btn-finish" @click="showSummary = true">🏁 結束練習</button>
-        <!-- 只有已驗證的老師才看得到備課中心與登出按鈕 -->
-        <template v-if="isAdminAuthenticated">
-          <button class="btn-admin" @click="openAdmin">👩‍🏫 教師備課中心</button>
-          <button class="btn-logout" @click="logoutAdmin">🚪 登出教師</button>
-        </template>
-        <button class="btn-analytics" @click="openAnalytics">📊 數據分析</button>
+        <!-- 狀態標籤區 -->
+        <div class="status-group">
+          <div v-if="targetCount > 0" class="progress-tracker"
+            :class="{ 'all-done': presenceCompletedCount >= targetCount }">
+            ✅ 作答進度：{{ presenceCompletedCount }} / {{ targetCount }} 人
+          </div>
+          <div class="progress-bar">第 {{ currentIndex + 1 }} / {{ questionBank.length }} 關</div>
+        </div>
+
+        <!-- 操作按鈕區 -->
+        <div class="action-group">
+          <button class="btn btn-finish" @click="showSummary = true">
+            <span class="btn-icon">🏁</span> <span class="btn-text">結束練習</span>
+          </button>
+
+          <template v-if="isAdminAuthenticated">
+            <button class="btn btn-admin" @click="openAdmin">
+              <span class="btn-icon">👩‍🏫</span> <span class="btn-text">教師備課中心</span>
+            </button>
+            <button class="btn btn-logout" @click="logoutAdmin">
+              <span class="btn-icon">🚪</span> <span class="btn-text">登出教師</span>
+            </button>
+          </template>
+
+          <button class="btn btn-analytics" @click="openAnalytics">
+            <span class="btn-icon">📊</span> <span class="btn-text">數據分析</span>
+          </button>
+        </div>
       </div>
     </header>
 
@@ -350,8 +374,12 @@ const logoutAdmin = () => {
           :highlightPart="fullSentenceData.modifier" :speechRate="currentQuestion.speechRate || 0.8"
           @skip="nextQuestion" />
         <p v-else class="skip-hint">已略過語音練習。</p>
-        <button class="btn-primary mt-4" @click="nextQuestion">
-          {{ currentIndex < questionBank.length - 1 ? '下一關 ➔' : '完成練習 🏁' }} </button>
+
+        <button class="btn-primary mt-4" @click="nextQuestion" :disabled="isClassMode">
+          {{ isClassMode ? '等待老師解鎖...' : (currentIndex < questionBank.length - 1 ? '下一關 ➔' : '完成練習 🏁') }} </button>
+            <p v-if="isClassMode" style="color: #ff9800; margin-top: 10px; font-weight: bold;">
+              ⚠️ 上課模式已啟動，請等待老師統一發送下一題。
+            </p>
       </div>
 
       <div v-else-if="currentQuestion.type === 'contrast' && currentQuestion.contrastData" class="stage-content">
@@ -387,13 +415,11 @@ const logoutAdmin = () => {
       <div v-else-if="currentStage === 'micro'" class="stage-content">
         <h2 class="instruction">圖塊已解鎖！請排列出正確的字序。</h2>
         <div class="target-noun"><span class="highlight">{{ currentQuestion.targetNoun }}</span></div>
-        <MicroTileUnscramble :initialTiles="currentQuestion.mode === 'reduce'
-            ? currentQuestion.grammarFeature.relative.correctAnswer  // 👈 Reduce 模式傳入原句順序
-            : currentQuestion.grammarFeature[currentMode].tiles      // Build 模式傳入打亂的
-          " :antecedent="currentQuestion.antecedent" :correctAnswer="currentQuestion.mode === 'reduce'
-                ? currentQuestion.grammarFeature.preposition.correctAnswer
-                : currentQuestion.grammarFeature[currentMode].correctAnswer
-              " :mode="currentQuestion.mode || 'build'" :contextCloze="currentQuestion.contextCloze"
+        <MicroTileUnscramble
+          :initialTiles="currentQuestion.mode === 'reduce' ? currentQuestion.grammarFeature.relative.tiles : currentQuestion.grammarFeature[currentMode].tiles"
+          :antecedent="currentQuestion.antecedent"
+          :correctAnswer="currentQuestion.mode === 'reduce' ? currentQuestion.grammarFeature.preposition.correctAnswer : currentQuestion.grammarFeature[currentMode].correctAnswer"
+          :mode="currentQuestion.mode || 'build'" :contextCloze="currentQuestion.contextCloze"
           :speechRate="currentQuestion.speechRate || 0.8" @success="handleSuccess"
           @misconception="handleMisconception" />
       </div>
@@ -416,7 +442,6 @@ const logoutAdmin = () => {
       </div>
     </div>
 
-    <!-- 👈 確保這裡傳遞了正確的事件 -->
     <TeacherAdmin v-if="showAdmin" :currentQuestions="questionBank" @update="updateQuestionBank"
       @sync-local="handleLocalSync" @push="handlePushQuestion" @close="showAdmin = false" />
 
@@ -425,134 +450,263 @@ const logoutAdmin = () => {
 </template>
 
 <style scoped>
-/* 樣式保持不變 */
+/* =========================================
+   全域變數與基礎設定
+   ========================================= */
+:root {
+  --primary-color: #1cb0f6;
+  --success-color: #58cc02;
+  --warning-color: #ffc800;
+  --danger-color: #ff4b4b;
+  --purple-color: #9c27b0;
+  --text-main: #333;
+  --text-muted: #777;
+  --bg-main: #f7f9fc;
+}
+
 .app-container {
-  max-width: 800px;
+  max-width: 900px;
   margin: 0 auto;
   padding: 40px 20px;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: var(--bg-main);
+  box-sizing: border-box;
 }
 
+/* =========================================
+   Header 與按鈕佈局優化
+   ========================================= */
 header {
   text-align: center;
-  margin-bottom: 30px;
+  margin-bottom: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
 }
 
 header h1 {
-  color: #1cb0f6;
-  font-size: 2.2rem;
+  color: var(--primary-color);
+  font-size: 2.4rem;
   letter-spacing: -0.5px;
-  margin: 0 0 16px 0;
-  font-weight: 800;
+  margin: 0;
+  font-weight: 900;
+  text-shadow: 0 2px 4px rgba(28, 176, 246, 0.15);
 }
 
 .header-controls {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
   align-items: center;
   gap: 16px;
+  width: 100%;
+}
+
+/* 狀態標籤組 */
+.status-group {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
   flex-wrap: wrap;
 }
 
+.progress-tracker,
 .progress-bar {
   padding: 8px 20px;
-  background: #e6f7ff;
-  color: #1cb0f6;
   border-radius: 20px;
   font-weight: bold;
   font-size: 0.95rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
+.progress-tracker {
+  background: #fff3e0;
+  color: #ff9800;
+  transition: all 0.3s ease;
+}
+
+.progress-tracker.all-done {
+  background: #dcfce7;
+  color: #166534;
+  box-shadow: 0 0 12px rgba(88, 204, 2, 0.4);
+}
+
+.progress-bar {
+  background: #e6f7ff;
+  color: var(--primary-color);
+}
+
+/* 操作按鈕組 */
+.action-group {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  width: 100%;
+  max-width: 850px;
+}
+
+/* 通用按鈕樣式 (立體感 + 絕對不會消失的文字) */
+.btn {
+  border: none;
+  padding: 10px 20px;
+  border-radius: 12px;
+  font-weight: 800;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  /* 圖標與文字間距 */
+  white-space: nowrap;
+  color: #ffffff !important;
+  /* 強制文字為白色，防止被其他樣式隱藏 */
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  /* 讓文字邊緣更清晰 */
+}
+
+/* Hover 狀態：微微上浮 + 陰影加深 */
+.btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  filter: brightness(1.1);
+  /* 稍微提亮 */
+}
+
+/* Active 狀態：按壓感 */
+.btn:active {
+  transform: translateY(2px) !important;
+  box-shadow: 0 0px 0px transparent !important;
+}
+
+.btn-icon {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+/* 結束練習 (改用更醒目的橘紅色系) */
 .btn-finish {
-  background: #58cc02;
-  color: white;
-  border: none;
-  border-bottom: 4px solid #46a302;
-  padding: 8px 20px;
-  border-radius: 12px;
-  font-weight: bold;
-  cursor: pointer;
-  transition: all 0.1s;
+  background: #ff6b6b;
+  border-bottom: 4px solid #e05252;
 }
 
-.btn-finish:active {
-  border-bottom-width: 0;
-  transform: translateY(4px);
+.btn-finish:hover {
+  background: #ff5252;
 }
 
+/* 教師備課 */
 .btn-admin {
-  background: #ffc800;
-  color: #fff;
-  border: none;
-  border-bottom: 4px solid #e5b200;
-  padding: 8px 20px;
-  border-radius: 12px;
-  font-weight: bold;
-  cursor: pointer;
-  transition: all 0.1s;
+  background: #fbc02d;
+  border-bottom: 4px solid #dca500;
 }
 
-.btn-admin:active {
-  border-bottom-width: 0;
-  transform: translateY(4px);
+/* 登出教師 (灰白色系，避免搶走主視覺) */
+.btn-logout {
+  background: #9e9e9e;
+  border-bottom: 4px solid #757575;
 }
 
+.btn-logout .btn-icon {
+  filter: grayscale(1) brightness(10);
+  /* 讓圖標保持白色 */
+}
+
+/* 數據分析 */
 .btn-analytics {
-  background: #9c27b0;
-  color: white;
-  border: none;
-  border-bottom: 4px solid #7b1fa2;
-  padding: 8px 20px;
-  border-radius: 12px;
-  font-weight: bold;
-  cursor: pointer;
-  transition: all 0.1s;
+  background: #ab47bc;
+  border-bottom: 4px solid #8e24aa;
 }
 
-.btn-analytics:active {
-  border-bottom-width: 0;
-  transform: translateY(4px);
+/* 手機版響應式調整 */
+@media (max-width: 600px) {
+  header h1 {
+    font-size: 1.8rem;
+  }
+
+  .action-group {
+    gap: 8px;
+  }
+
+  .btn {
+    padding: 8px 16px;
+    font-size: 0.85rem;
+  }
+
+  .progress-tracker,
+  .progress-bar {
+    font-size: 0.85rem;
+    padding: 6px 16px;
+  }
 }
 
+/* =========================================
+   遊戲卡片主體
+   ========================================= */
 .game-card {
   background: white;
   border-radius: 24px;
   padding: 40px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.08);
-  border: 2px solid #e5e5e5;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.06);
+  border: 2px solid #f0f0f0;
   flex: 1;
   display: flex;
   flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .stage-content {
   display: flex;
   flex-direction: column;
   flex: 1;
+  width: 100%;
 }
 
 .instruction {
   text-align: center;
-  color: #777;
+  color: var(--text-muted);
   font-size: 1.1rem;
   margin: 0 0 24px 0;
 }
 
 .target-noun {
   text-align: center;
-  font-size: 2rem;
+  font-size: 2.2rem;
   font-weight: 800;
   margin-bottom: 30px;
-  color: #333;
+  color: var(--text-main);
 }
 
 .highlight {
-  color: #1cb0f6;
+  color: var(--primary-color);
+  position: relative;
 }
 
+.highlight::after {
+  content: '';
+  position: absolute;
+  bottom: 2px;
+  left: 0;
+  width: 100%;
+  height: 6px;
+  background: rgba(28, 176, 246, 0.2);
+  border-radius: 4px;
+  z-index: -1;
+}
+
+/* =========================================
+   成功畫面
+   ========================================= */
 .success-screen {
   display: flex;
   flex-direction: column;
@@ -581,14 +735,14 @@ header h1 {
 }
 
 .success-screen h2 {
-  color: #58cc02;
+  color: var(--success-color);
   font-size: 2.2rem;
   margin: 0 0 24px 0;
   font-weight: 800;
 }
 
 .btn-primary {
-  background-color: #58cc02;
+  background-color: var(--success-color);
   color: white;
   border: none;
   border-bottom: 5px solid #46a302;
@@ -599,11 +753,19 @@ header h1 {
   cursor: pointer;
   transition: all 0.1s;
   margin-top: 20px;
+  width: 100%;
+  max-width: 300px;
 }
 
-.btn-primary:active {
+.btn-primary:active:not(:disabled) {
   border-bottom-width: 0;
   transform: translateY(5px);
+}
+
+.btn-primary:disabled {
+  background-color: #ccc;
+  border-bottom-color: #999;
+  cursor: not-allowed;
 }
 
 .skip-hint {
@@ -612,51 +774,84 @@ header h1 {
   margin-bottom: 24px;
 }
 
-@keyframes popIn {
-  0% {
-    transform: scale(0.9);
-    opacity: 0;
-  }
-
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
-
-.auth-overlay {
+/* =========================================
+   遮罩層與彈窗 (計時器、警告、登入)
+   ========================================= */
+.auth-overlay,
+.timeout-overlay,
+.focus-warning-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  inset: 0;
   display: flex;
   justify-content: center;
   align-items: center;
-  z-index: 10001;
+  z-index: 10000;
   backdrop-filter: blur(4px);
 }
 
-.auth-card {
+.auth-overlay {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.timeout-overlay {
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 99999;
+}
+
+.focus-warning-overlay {
+  background: rgba(255, 75, 75, 0.15);
+  pointer-events: none;
+  z-index: 99999;
+}
+
+.auth-card,
+.timeout-box,
+.warning-box {
   background: white;
-  padding: 32px;
   border-radius: 24px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.2);
+  animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   text-align: center;
+}
+
+.auth-card {
+  padding: 32px;
   width: 320px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
-  animation: popIn 0.3s;
 }
 
-.auth-card h3 {
-  margin: 0 0 8px 0;
-  color: #333;
+.timeout-box {
+  padding: 40px;
+  border: 4px solid var(--danger-color);
+}
+
+.warning-box {
+  padding: 24px 40px;
+  border: 3px solid var(--danger-color);
+  box-shadow: 0 12px 32px rgba(255, 75, 75, 0.3);
+}
+
+.auth-card h3,
+.timeout-box h2 {
   font-size: 1.5rem;
+  margin: 0 0 8px 0;
 }
 
-.auth-card p {
-  color: #777;
-  font-size: 0.9rem;
+.timeout-box h2,
+.warning-box h2 {
+  color: var(--danger-color);
+  font-size: 2rem;
+}
+
+.warning-box h2 {
+  font-size: 1.5rem;
+  margin: 0 0 8px 0;
+}
+
+.auth-card p,
+.timeout-box p,
+.warning-box p {
+  color: var(--text-muted);
+  font-size: 0.95rem;
   margin-bottom: 20px;
 }
 
@@ -673,7 +868,7 @@ header h1 {
 }
 
 .auth-card input:focus {
-  border-color: #1cb0f6;
+  border-color: var(--primary-color);
 }
 
 .auth-actions {
@@ -681,7 +876,9 @@ header h1 {
   gap: 12px;
 }
 
-.auth-actions button {
+.auth-actions button,
+.btn-timeout-next,
+.btn-add-time {
   flex: 1;
   padding: 14px;
   border-radius: 12px;
@@ -694,11 +891,11 @@ header h1 {
 
 .btn-cancel {
   background: #f0f0f0;
-  color: #777;
+  color: var(--text-muted);
 }
 
 .btn-confirm {
-  background: #1cb0f6;
+  background: var(--primary-color);
   color: white;
   border-bottom: 4px solid #1899d6;
 }
@@ -708,50 +905,27 @@ header h1 {
   transform: translateY(4px);
 }
 
-.focus-warning-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(255, 75, 75, 0.15);
-  backdrop-filter: blur(2px);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 99999;
-  pointer-events: none;
+.btn-timeout-next {
+  background: var(--danger-color);
+  color: white;
+  border-bottom: 4px solid #cc0000;
+  width: 100%;
+  padding: 16px 32px;
 }
 
-.warning-box {
-  background: white;
-  padding: 24px 40px;
-  border-radius: 16px;
-  box-shadow: 0 12px 32px rgba(255, 75, 75, 0.3);
-  border: 3px solid #ff4b4b;
-  text-align: center;
-  animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+.btn-timeout-next:active {
+  border-bottom-width: 0;
+  transform: translateY(4px);
 }
 
-.warning-box h2 {
-  color: #ff4b4b;
-  margin: 0 0 8px 0;
-  font-size: 1.5rem;
-}
-
-.warning-box p {
-  color: #555;
-  margin: 0;
-  font-weight: bold;
-}
-
+/* 計時器 */
 .timer-bar {
   position: fixed;
   top: 20px;
   left: 50%;
   transform: translateX(-50%);
   background: #e6f7ff;
-  color: #1cb0f6;
+  color: var(--primary-color);
   padding: 8px 24px;
   border-radius: 20px;
   font-weight: bold;
@@ -761,79 +935,53 @@ header h1 {
   display: flex;
   align-items: center;
   gap: 12px;
+  white-space: nowrap;
 }
 
 .timer-bar.urgent {
   background: #ffe6e6;
-  color: #ff4b4b;
+  color: var(--danger-color);
   animation: pulse 1s infinite;
 }
 
 .btn-add-time {
-  background: #1cb0f6;
+  background: var(--primary-color);
   color: white;
-  border: none;
-  padding: 4px 8px;
+  padding: 4px 12px;
   border-radius: 8px;
-  font-weight: bold;
-  cursor: pointer;
+  font-size: 0.9rem;
+  flex: none;
 }
 
 .btn-add-time:active {
   transform: scale(0.95);
 }
 
-.timeout-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 99999;
+/* 動畫 */
+@keyframes popIn {
+  0% {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
-.timeout-box {
-  background: white;
-  padding: 40px;
-  border-radius: 24px;
-  text-align: center;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.3);
-  border: 4px solid #ff4b4b;
-  animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-}
+@keyframes pulse {
+  0% {
+    transform: translateX(-50%) scale(1);
+  }
 
-.timeout-box h2 {
-  color: #ff4b4b;
-  font-size: 2rem;
-  margin: 0 0 12px 0;
-}
+  50% {
+    transform: translateX(-50%) scale(1.05);
+  }
 
-.timeout-box p {
-  color: #777;
-  font-size: 1.1rem;
-  margin-bottom: 24px;
-}
-
-.btn-timeout-next {
-  background: #ff4b4b;
-  color: white;
-  border: none;
-  border-bottom: 4px solid #cc0000;
-  padding: 16px 32px;
-  border-radius: 16px;
-  font-size: 1.1rem;
-  font-weight: bold;
-  cursor: pointer;
-}
-
-.btn-timeout-next:active {
-  border-bottom-width: 0;
-  transform: translateY(4px);
+  100% {
+    transform: translateX(-50%) scale(1);
+  }
 }
 
 .fade-enter-active,
@@ -846,20 +994,35 @@ header h1 {
   opacity: 0;
 }
 
-.btn-logout {
-  background: #f0f0f0;
-  color: #777;
-  border: none;
-  border-bottom: 4px solid #ccc;
-  padding: 8px 20px;
-  border-radius: 12px;
-  font-weight: bold;
-  cursor: pointer;
-  transition: all 0.1s;
-}
+/* 響應式調整 (手機版) */
+@media (max-width: 600px) {
+  header h1 {
+    font-size: 1.8rem;
+  }
 
-.btn-logout:active {
-  border-bottom-width: 0;
-  transform: translateY(4px);
+  .game-card {
+    padding: 24px;
+  }
+
+  .action-group {
+    gap: 8px;
+  }
+
+  .btn {
+    padding: 8px 16px;
+    font-size: 0.85rem;
+  }
+
+  .progress-tracker,
+  .progress-bar {
+    font-size: 0.85rem;
+    padding: 6px 16px;
+  }
+
+  .timer-bar {
+    font-size: 1rem;
+    padding: 6px 16px;
+    top: 10px;
+  }
 }
 </style>

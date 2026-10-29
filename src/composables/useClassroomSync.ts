@@ -1,60 +1,66 @@
 import { supabase } from '../services/supabaseClient';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
-// 👈 把 channel 放到模块外部，保证全局唯一
 let channel: RealtimeChannel | null = null;
 
 export function useClassroomSync() {
-    const joinRoom = (onReceive: (event: string, payload: any) => void) => {
-        // 徹底斷開舊連線
+    const joinRoom = (onReceive: (event: string, payload: any) => void, studentId: string = 'anonymous') => {
         if (channel) {
-            console.log('🔌 [Sync] 移除舊的 WebSocket 連線');
             supabase.removeChannel(channel);
             channel = null;
         }
 
-        // 建立全新的唯一連線
         const channelName = `classroom_sync_${Date.now()}`;
-        console.log(`📡 [Sync] 建立新的 WebSocket 連線: ${channelName}`);
 
-        channel = supabase.channel(channelName)
-            .on(
-                'postgres_changes',
-                { event: 'UPDATE', schema: 'public', table: 'classroom_state' },
-                (payload) => {
-                    console.log('📡 [Sync] 偵測到資料庫狀態更新:', payload.new);
-                    const newState = payload.new;
-
-                    onReceive('SYNC_STATE', {
-                        id: newState.current_question_id,
-                        timerEndTime: newState.timer_end_time
-                    });
-                }
-            )
-            .subscribe((status) => {
+        channel = supabase.channel(channelName, {
+            config: {
+                presence: {
+                    key: studentId,
+                },
+            },
+        })
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'classroom_state' }, (payload) => {
+                const newState = payload.new;
+                onReceive('SYNC_STATE', {
+                    id: newState.current_question_id,
+                    timerEndTime: newState.timer_end_time,
+                    isClassMode: newState.is_class_mode,
+                    targetCount: newState.target_count
+                });
+            })
+            .on('presence', { event: 'sync' }, () => {
+                const presenceState = channel?.presenceState() || {};
+                const completedCount = Object.values(presenceState)
+                    .flat()
+                    .filter((p: any) => p.status === 'completed').length;
+                onReceive('PRESENCE_SYNC', { completedCount });
+            })
+            .subscribe(async (status) => {
                 if (status === 'SUBSCRIBED') {
-                    console.log('✅ [Sync] 已連線至資料庫變更監聽');
-                    syncState(onReceive);
+                    await channel?.track({ status: 'answering' });
+                    // 連線成功時主動拉取一次最新狀態
+                    const { data } = await supabase.from('classroom_state').select('*').eq('id', 'current_state').single();
+                    if (data) {
+                        onReceive('SYNC_STATE', {
+                            id: data.current_question_id,
+                            timerEndTime: data.timer_end_time,
+                            isClassMode: data.is_class_mode,
+                            targetCount: data.target_count
+                        });
+                    }
                 }
             });
-
-        const handleVisibilityChange = () => {
-            if (!document.hidden) syncState(onReceive);
-        };
-        document.addEventListener('visibilitychange', handleVisibilityChange);
-
-        (channel as any)._cleanup = () => {
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-        };
     };
 
-    const syncState = async (onReceive: (event: string, payload: any) => void) => {
-        const { data, error } = await supabase.from('classroom_state').select('*').eq('id', 'current_state').single();
-        if (data && data.current_question_id && !error) {
-            onReceive('SYNC_STATE', {
-                id: data.current_question_id,
-                timerEndTime: data.timer_end_time
-            });
+    const trackCompleted = async () => {
+        if (channel) {
+            await channel.track({ status: 'completed' });
+        }
+    };
+
+    const trackAnswering = async () => {
+        if (channel) {
+            await channel.track({ status: 'answering' });
         }
     };
 
@@ -76,14 +82,22 @@ export function useClassroomSync() {
         });
     };
 
-    const leaveRoom = () => {
-        if (channel) {
-            console.log('🔌 [Sync] 離開房間，清理 WebSocket');
-            if ((channel as any)._cleanup) (channel as any)._cleanup();
-            supabase.removeChannel(channel);
-            channel = null;
-        }
+    const updateClassMode = async (isClassMode: boolean, targetCount: number, password: string) => {
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        await fetch(`${supabaseUrl}/functions/v1/teacher-action`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                password,
+                action: 'UPDATE_SETTINGS',
+                payload: { isClassMode, targetCount }
+            })
+        });
     };
 
-    return { joinRoom, sendPush, sendAddTime, leaveRoom };
+    const leaveRoom = () => {
+        if (channel) { supabase.removeChannel(channel); channel = null; }
+    };
+
+    return { joinRoom, trackCompleted, trackAnswering, sendPush, sendAddTime, updateClassMode, leaveRoom };
 }

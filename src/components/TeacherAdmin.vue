@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import type { QuestionData } from '../rules/types';
 import { VueDraggable } from 'vue-draggable-plus';
+import { useClassroomSync } from '../composables/useClassroomSync'; //  補上這行
 
 const props = defineProps<{ currentQuestions: QuestionData[]; }>();
 
@@ -13,10 +14,15 @@ const speechRate = ref<number>(0.8);
 const isTimedForm = ref(false);
 const timeLimitForm = ref<number>(60);
 
+//  新增：班級控制狀態
+const isClassModeToggle = ref(false);
+const targetCountInput = ref(30);
+const { updateClassMode } = useClassroomSync();
+
 const emit = defineEmits<{
   (e: 'update', questions: QuestionData[]): void;
   (e: 'sync-local', questions: QuestionData[]): void;
-  (e: 'push', id: string): void;
+  (e: 'push', id: string): void; //  確保這裡是 id: string
   (e: 'close'): void;
 }>();
 
@@ -29,6 +35,9 @@ const distractorImageUrl = ref('');
 const targetNoun = ref('');
 const relativeSentence = ref('');
 const prepositionSentence = ref('');
+const funnelDiscarded = computed(() =>
+  relativeSentence.value.replace(/\[[^\]]+\]/g, '').replace(/\s+/g, ' ').trim()
+);
 const tagsInput = ref('');
 const chineseSentence = ref('');
 const chineseHighlight = ref('');
@@ -53,29 +62,11 @@ const uploadTarget = ref<'noun' | 'distractor' | 'modifier'>('noun');
 const activeUploadTarget = ref<'noun' | 'distractor' | 'modifier' | null>(null);
 const isEditing = computed(() => editingId.value !== null);
 
-// ==========================================
-// 👈 漏斗預覽與自動生成邏輯
-// ==========================================
-
-// 只負責計算「被丟棄」的部分
-const funnelDiscarded = computed(() => {
-  if (!relativeSentence.value || questionMode.value !== 'reduce') return '';
-  return relativeSentence.value.replace(/\[[^\]]+\]/g, '').trim().replace(/\s+/g, ' ');
-});
-
-// 監聽句型 A 的變化，自動填入句型 B 的初始值
-watch(relativeSentence, (newVal) => {
-  if (questionMode.value === 'reduce') {
-    const match = newVal.match(/\[([^\]]+)\]/);
-    if (match) {
-      prepositionSentence.value = `[${match[1]}]`;
-    } else {
-      prepositionSentence.value = '';
-    }
-  }
-});
-
-// ==========================================
+//  新增：處理班級模式切換
+const handleModeChange = () => {
+  const pwd = sessionStorage.getItem('admin_auth') ? 'admin123' : '';
+  updateClassMode(isClassModeToggle.value, targetCountInput.value, pwd);
+};
 
 const resetForm = () => {
   chunkZhInput.value = ''; chunkQuizInput.value = ''; distractorImageUrl.value = '';
@@ -194,7 +185,6 @@ const generateTiles = (sentence: string) => {
   return tiles;
 };
 
-// 新增：切換迷思干擾磚的函數
 const toggleDistractor = (word: string) => {
   let current = distractorsInput.value.split(/[,，\s]+/).filter(Boolean);
   if (current.includes(word)) {
@@ -205,7 +195,6 @@ const toggleDistractor = (word: string) => {
   distractorsInput.value = current.join(', ');
 };
 
-// 新增：判斷某個字是否已經被選中
 const isDistractorActive = (word: string) => {
   return distractorsInput.value.split(/[,，\s]+/).includes(word);
 };
@@ -227,7 +216,6 @@ const saveQuestion = () => {
 
   let finalTiles = [...relCorrect, ...distractors];
 
-  // 👈 核心修正：處理 Reduce 模式的動態字磚替換
   if (questionMode.value === 'reduce') {
     const originalChunkMatch = relativeSentence.value.match(/\[([^\]]+)\]/);
     const originalChunk = originalChunkMatch ? originalChunkMatch[1] : '';
@@ -236,17 +224,14 @@ const saveQuestion = () => {
     if (originalChunk && newChunk && originalChunk !== newChunk) {
       const newChunkWithBrackets = `[${newChunk}]`;
 
-      // 1. 更新 correctAnswer (學生端一開始看到的所有字磚)
       const idx = relCorrect.findIndex(t => t === `[${originalChunk}]`);
       if (idx !== -1) relCorrect[idx] = newChunkWithBrackets;
 
-      // 2. 更新 tiles (學生端的字磚庫)
       const tileIdx = finalTiles.findIndex(t => t === `[${originalChunk}]`);
       if (tileIdx !== -1) finalTiles[tileIdx] = newChunkWithBrackets;
     }
   }
 
-  // 3. 去重並打亂
   finalTiles = [...new Set(finalTiles)];
   finalTiles.sort(() => Math.random() - 0.5);
 
@@ -359,6 +344,21 @@ const saveAllAndClose = () => {
             <h2>📚 課前備課中心</h2>
             <p>點擊題目編輯，或點擊「發送」讓全班跳轉。</p>
           </div>
+
+          <!--  新增：上課模式與人數設定 -->
+          <div class="class-mode-panel">
+            <div class="mode-toggle">
+              <label>
+                <input type="checkbox" v-model="isClassModeToggle" @change="handleModeChange" />
+                🎓 上課模式 (鎖定學生進度)
+              </label>
+            </div>
+            <div class="target-count">
+              <label>目標人數：</label>
+              <input type="number" v-model.number="targetCountInput" @change="handleModeChange" />
+            </div>
+          </div>
+
           <div class="sidebar-section" style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
             <div class="section-header" @click="isQuestionsExpanded = !isQuestionsExpanded">
               <h3>📝 題目列表</h3>
@@ -376,11 +376,6 @@ const saveAllAndClose = () => {
                       第 {{ index + 1 }} 關
                       <span class="q-type-tag" :class="q.type">{{ q.type === 'contrast' ? '對比題' : q.type === 'chunk' ?
                         '片語題' : '標準題' }}</span>
-
-                      <!-- 👈 新增：如果是標準題，顯示 Build 或 Reduce 標籤 -->
-                      <span v-if="q.type === 'standard'" class="q-mode-tag" :class="q.mode || 'build'">
-                        {{ q.mode === 'reduce' ? 'Reduce' : 'Build' }}
-                      </span>
                       <span v-if="q.isTimed" class="q-time-tag">🔴 {{ q.timeLimit || 60 }}s</span>
                       <span v-else class="q-free-tag">🟢 自由</span>
                     </div>
@@ -484,7 +479,7 @@ const saveAllAndClose = () => {
             <!-- 圖片上傳區 -->
             <div class="form-group">
               <label>{{ questionType === 'contrast' ? '名詞圖片 (拼圖右側)' : questionType === 'chunk' ? '片語情境圖片' : '正確角色圖片'
-              }}</label>
+                }}</label>
               <div class="upload-area" :class="{ 'active-upload': activeUploadTarget === 'noun' }"
                 @click="triggerUpload('noun')">
                 <img v-if="imageUrl" :src="imageUrl" class="preview-img" />
@@ -557,7 +552,6 @@ const saveAllAndClose = () => {
             <div v-if="questionType === 'standard' && questionMode === 'reduce'" class="funnel-preview">
               <div class="funnel-title">🔍 系統自動拆解預覽 (可手動修改保留內容)</div>
 
-              <!-- 👈 保留區改為可編輯的輸入框 -->
               <div class="funnel-row">
                 <span class="funnel-label" style="color: #166534;">🟢 保留 (簡化句)</span>
                 <input v-model="prepositionSentence" type="text" class="funnel-input-kept"
@@ -575,37 +569,32 @@ const saveAllAndClose = () => {
               </p>
             </div>
 
-            <!-- 隱藏的句型 B (由系統自動生成，不再讓老師手動填) -->
             <div class="form-group" v-if="questionType === 'standard' && questionMode === 'reduce'"
               style="display: none;">
               <input v-model="prepositionSentence" type="text" />
             </div>
 
-            <!-- 👈 改造：干擾磚選擇器 -->
+            <!-- 干擾磚選擇器 -->
             <div class="form-group" v-if="questionType === 'standard'">
               <label>迷思干擾磚 (點擊下方標籤快速加入)</label>
 
               <div class="distractor-tags">
-                <!-- 測試重複代名詞 -->
                 <button v-for="tag in ['she', 'he', 'it', 'they']" :key="tag"
                   :class="{ active: isDistractorActive(tag) }" @click.prevent="toggleDistractor(tag)">
                   {{ tag }}
                 </button>
                 <div class="divider"></div>
-                <!-- 測試主謂一致 -->
                 <button v-for="tag in ['wear', 'have', 'live', 'look']" :key="tag"
                   :class="{ active: isDistractorActive(tag) }" @click.prevent="toggleDistractor(tag)">
                   {{ tag }}
                 </button>
                 <div class="divider"></div>
-                <!-- 測試關代選擇 -->
                 <button v-for="tag in ['who', 'which']" :key="tag" :class="{ active: isDistractorActive(tag) }"
                   @click.prevent="toggleDistractor(tag)">
                   {{ tag }}
                 </button>
               </div>
 
-              <!-- 保留手動輸入給進階老師 -->
               <input v-model="distractorsInput" type="text" placeholder="或手動輸入其他干擾磚 (用逗號隔開)" style="margin-top: 12px;"
                 @focus="activeUploadTarget = null" />
             </div>
@@ -681,7 +670,7 @@ const saveAllAndClose = () => {
 </template>
 
 <style scoped>
-/* 樣式保持不變，並補上漏斗樣式與輸入框樣式 */
+/* 樣式保持不變，加上 class-mode-panel 樣式 */
 .admin-modal {
   position: fixed;
   top: 0;
@@ -748,6 +737,45 @@ const saveAllAndClose = () => {
   font-size: 0.85rem;
   color: #777;
   line-height: 1.5;
+}
+
+/*  新增：班級模式面板 */
+.class-mode-panel {
+  padding: 16px 24px;
+  background: #fff8e1;
+  border-bottom: 2px solid #ffe082;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mode-toggle label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: bold;
+  color: #b45309;
+  cursor: pointer;
+}
+
+.target-count {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.target-count label {
+  font-weight: bold;
+  color: #b45309;
+}
+
+.target-count input {
+  width: 60px;
+  padding: 4px 8px;
+  border: 2px solid #ffe082;
+  border-radius: 8px;
+  font-size: 1rem;
+  outline: none;
 }
 
 .sidebar-section {
@@ -1280,7 +1308,6 @@ const saveAllAndClose = () => {
   margin: 0 4px;
 }
 
-/* 👈 漏斗預覽樣式與可編輯輸入框 */
 .funnel-preview {
   background: #f0f4f8;
   border: 2px dashed #cbd5e1;

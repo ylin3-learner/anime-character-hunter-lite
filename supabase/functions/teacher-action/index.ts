@@ -31,7 +31,15 @@ serve(async (req) => {
         timer_end_time: timerEndTime,
         updated_at: new Date().toISOString()
       }).eq('id', 'current_state')
-    } 
+    }
+    else if (action === 'UPDATE_SETTINGS') {
+      const { isClassMode, targetCount } = payload
+      await supabaseClient.from('classroom_state').update({
+        is_class_mode: isClassMode,
+        target_count: targetCount,
+        updated_at: new Date().toISOString()
+      }).eq('id', 'current_state')
+    }
     else if (action === 'ADD_TIME') {
       const { newEndTime } = payload
       await supabaseClient.from('classroom_state').update({
@@ -46,7 +54,7 @@ serve(async (req) => {
   } catch (error) {
     // 修正：確保 error 是 Error 實例，才能安全地讀取 message
     const errorMessage = error instanceof Error ? error.message : String(error)
-    
+
     return new Response(JSON.stringify({ error: errorMessage }), {
       status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })
