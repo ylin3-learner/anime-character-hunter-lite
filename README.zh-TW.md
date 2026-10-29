@@ -1,6 +1,3 @@
-### 2. `README.zh-TW.md` (繁體中文版)
-
-```markdown
 # 🕵️ Anime Character Hunter Lite（動漫角色大搜尋）
 
 **[English](README.md) | [繁體中文](README.zh-TW.md)**
