@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import type { QuestionData } from '../rules/types';
 import { VueDraggable } from 'vue-draggable-plus';
 
@@ -16,7 +16,7 @@ const timeLimitForm = ref<number>(60);
 const emit = defineEmits<{
   (e: 'update', questions: QuestionData[]): void;
   (e: 'sync-local', questions: QuestionData[]): void;
-  (e: 'push', id: string): void; // 改回 id: string
+  (e: 'push', id: string): void;
   (e: 'close'): void;
 }>();
 
@@ -52,6 +52,30 @@ const modifierFileInput = ref<HTMLInputElement | null>(null);
 const uploadTarget = ref<'noun' | 'distractor' | 'modifier'>('noun');
 const activeUploadTarget = ref<'noun' | 'distractor' | 'modifier' | null>(null);
 const isEditing = computed(() => editingId.value !== null);
+
+// ==========================================
+// 👈 漏斗預覽與自動生成邏輯
+// ==========================================
+
+// 只負責計算「被丟棄」的部分
+const funnelDiscarded = computed(() => {
+  if (!relativeSentence.value || questionMode.value !== 'reduce') return '';
+  return relativeSentence.value.replace(/\[[^\]]+\]/g, '').trim().replace(/\s+/g, ' ');
+});
+
+// 監聽句型 A 的變化，自動填入句型 B 的初始值
+watch(relativeSentence, (newVal) => {
+  if (questionMode.value === 'reduce') {
+    const match = newVal.match(/\[([^\]]+)\]/);
+    if (match) {
+      prepositionSentence.value = `[${match[1]}]`;
+    } else {
+      prepositionSentence.value = '';
+    }
+  }
+});
+
+// ==========================================
 
 const resetForm = () => {
   chunkZhInput.value = ''; chunkQuizInput.value = ''; distractorImageUrl.value = '';
@@ -170,10 +194,27 @@ const generateTiles = (sentence: string) => {
   return tiles;
 };
 
+// 新增：切換迷思干擾磚的函數
+const toggleDistractor = (word: string) => {
+  let current = distractorsInput.value.split(/[,，\s]+/).filter(Boolean);
+  if (current.includes(word)) {
+    current = current.filter(w => w !== word);
+  } else {
+    current.push(word);
+  }
+  distractorsInput.value = current.join(', ');
+};
+
+// 新增：判斷某個字是否已經被選中
+const isDistractorActive = (word: string) => {
+  return distractorsInput.value.split(/[,，\s]+/).includes(word);
+};
+
 const saveQuestion = () => {
   if (!targetNoun.value) { alert('請填寫目標名詞！'); return; }
   if (questionType.value !== 'chunk' && !relativeSentence.value) { alert('請填寫關係子句！'); return; }
   if (!imageUrl.value || imageUrl.value.includes('dicebear.com')) { alert('請務必上傳真實的「主要圖片」！'); return; }
+  if (questionMode.value === 'reduce' && !prepositionSentence.value) { alert('請在漏斗中填寫簡化後的片語！'); return; }
 
   const relCorrect = generateTiles(relativeSentence.value || '');
   let distractors = distractorsInput.value.split(/[,，\s]+/).filter(Boolean);
@@ -184,8 +225,34 @@ const saveQuestion = () => {
     distractors = [...new Set(distractors)].filter(d => !correctWords.includes(d.toLowerCase()));
   }
 
-  const finalTiles = [...relCorrect, ...distractors]; finalTiles.sort(() => Math.random() - 0.5);
-  const prepTiles = generateTiles(prepositionSentence.value || ''); const prepCorrect = [...prepTiles]; prepTiles.sort(() => Math.random() - 0.5);
+  let finalTiles = [...relCorrect, ...distractors];
+
+  // 👈 核心修正：處理 Reduce 模式的動態字磚替換
+  if (questionMode.value === 'reduce') {
+    const originalChunkMatch = relativeSentence.value.match(/\[([^\]]+)\]/);
+    const originalChunk = originalChunkMatch ? originalChunkMatch[1] : '';
+    const newChunk = prepositionSentence.value.replace(/[\[\]]/g, '').trim();
+
+    if (originalChunk && newChunk && originalChunk !== newChunk) {
+      const newChunkWithBrackets = `[${newChunk}]`;
+
+      // 1. 更新 correctAnswer (學生端一開始看到的所有字磚)
+      const idx = relCorrect.findIndex(t => t === `[${originalChunk}]`);
+      if (idx !== -1) relCorrect[idx] = newChunkWithBrackets;
+
+      // 2. 更新 tiles (學生端的字磚庫)
+      const tileIdx = finalTiles.findIndex(t => t === `[${originalChunk}]`);
+      if (tileIdx !== -1) finalTiles[tileIdx] = newChunkWithBrackets;
+    }
+  }
+
+  // 3. 去重並打亂
+  finalTiles = [...new Set(finalTiles)];
+  finalTiles.sort(() => Math.random() - 0.5);
+
+  const prepTiles = generateTiles(prepositionSentence.value || '');
+  const prepCorrect = [...prepTiles];
+  prepTiles.sort(() => Math.random() - 0.5);
 
   const newQuestion: QuestionData = {
     id: editingId.value || `q_${Date.now()}`,
@@ -263,10 +330,6 @@ const saveQuestion = () => {
   } else {
     localQuestions.value.push(newQuestion);
   }
-  resetItemHighlight();
-};
-
-const resetItemHighlight = () => {
   resetForm();
 };
 
@@ -275,10 +338,8 @@ const handleSaveAndPush = (id: string) => {
     saveQuestion();
   }
   setTimeout(() => {
-    // 1. 先將最新題庫（含新秒數）同步給 App.vue
     emit('sync-local', localQuestions.value);
-    // 2. 再發送題目 ID 觸發跳轉
-    emit('push', id); 
+    emit('push', id);
   }, 50);
 };
 
@@ -305,14 +366,12 @@ const saveAllAndClose = () => {
             </div>
             <div v-show="isQuestionsExpanded" style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
               <div class="question-list">
-                <!-- 👈 加上 handle=".drag-handle" 屬性 -->
                 <VueDraggable v-model="localQuestions" :animation="150" ghostClass="ghost" handle=".drag-handle"
                   class="question-list-inner">
                   <div v-for="(q, index) in localQuestions" :key="q.id" class="question-item"
                     :class="{ active: editingId === q.id }" @click="editQuestion(q)">
 
                     <div class="q-index">
-                      <!-- 👈 拖拽把手圖示 -->
                       <div class="drag-handle" title="按住拖曳排序">⋮⋮</div>
                       第 {{ index + 1 }} 關
                       <span class="q-type-tag" :class="q.type">{{ q.type === 'contrast' ? '對比題' : q.type === 'chunk' ?
@@ -420,7 +479,7 @@ const saveAllAndClose = () => {
             <!-- 圖片上傳區 -->
             <div class="form-group">
               <label>{{ questionType === 'contrast' ? '名詞圖片 (拼圖右側)' : questionType === 'chunk' ? '片語情境圖片' : '正確角色圖片'
-                }}</label>
+              }}</label>
               <div class="upload-area" :class="{ 'active-upload': activeUploadTarget === 'noun' }"
                 @click="triggerUpload('noun')">
                 <img v-if="imageUrl" :src="imageUrl" class="preview-img" />
@@ -476,17 +535,73 @@ const saveAllAndClose = () => {
               </div>
             </div>
 
-            <!-- 句型 A -->
+            <!-- 句型 A (漏斗輸入區) -->
             <div class="form-group" v-if="questionType !== 'chunk'">
-              <label>句型 A：關係子句 <span style="color: #1cb0f6; font-size: 0.8rem;">💡 用 [ ] 包住片語</span></label>
-              <input v-model="relativeSentence" type="text" placeholder="Ex: who wears [a blue uniform]"
+              <label style="display: flex; justify-content: space-between;">
+                <span>句型 A：關係子句 (漏斗入口)</span>
+                <span v-if="questionMode === 'reduce'" style="color: #1cb0f6; font-size: 0.8rem;">
+                  💡 用 [ ] 框住要保留的片語
+                </span>
+              </label>
+              <input v-model="relativeSentence" type="text"
+                :placeholder="questionMode === 'reduce' ? 'Ex: who wears [a blue uniform]' : 'Ex: who wears a blue uniform'"
                 @focus="activeUploadTarget = null" />
             </div>
 
-            <!-- 干擾磚 -->
+            <!-- 漏斗視覺化預覽 (只在 Reduce 模式顯示) -->
+            <div v-if="questionType === 'standard' && questionMode === 'reduce'" class="funnel-preview">
+              <div class="funnel-title">🔍 系統自動拆解預覽 (可手動修改保留內容)</div>
+
+              <!-- 👈 保留區改為可編輯的輸入框 -->
+              <div class="funnel-row">
+                <span class="funnel-label" style="color: #166534;">🟢 保留 (簡化句)</span>
+                <input v-model="prepositionSentence" type="text" class="funnel-input-kept"
+                  placeholder="Ex: [with a dictionary]" />
+              </div>
+
+              <div class="funnel-row">
+                <span class="funnel-label">🗑️ 丟棄 (垃圾桶)</span>
+                <span class="funnel-value discarded">{{ funnelDiscarded || '（無多餘詞彙）' }}</span>
+              </div>
+
+              <p
+                style="font-size: 0.85rem; color: #b45309; margin-top: 8px; background: #fef3c7; padding: 8px; border-radius: 8px;">
+                💡 提示：如果「動詞」要轉換為「介系詞」（例如 who is carrying ➔ with），請直接在綠色框內加上介系詞，系統會自動把該字加入學生的字磚庫。
+              </p>
+            </div>
+
+            <!-- 隱藏的句型 B (由系統自動生成，不再讓老師手動填) -->
+            <div class="form-group" v-if="questionType === 'standard' && questionMode === 'reduce'"
+              style="display: none;">
+              <input v-model="prepositionSentence" type="text" />
+            </div>
+
+            <!-- 👈 改造：干擾磚選擇器 -->
             <div class="form-group" v-if="questionType === 'standard'">
-              <label>迷思干擾磚 (選填)</label>
-              <input v-model="distractorsInput" type="text" placeholder="Ex: she, which, wear"
+              <label>迷思干擾磚 (點擊下方標籤快速加入)</label>
+
+              <div class="distractor-tags">
+                <!-- 測試重複代名詞 -->
+                <button v-for="tag in ['she', 'he', 'it', 'they']" :key="tag"
+                  :class="{ active: isDistractorActive(tag) }" @click.prevent="toggleDistractor(tag)">
+                  {{ tag }}
+                </button>
+                <div class="divider"></div>
+                <!-- 測試主謂一致 -->
+                <button v-for="tag in ['wear', 'have', 'live', 'look']" :key="tag"
+                  :class="{ active: isDistractorActive(tag) }" @click.prevent="toggleDistractor(tag)">
+                  {{ tag }}
+                </button>
+                <div class="divider"></div>
+                <!-- 測試關代選擇 -->
+                <button v-for="tag in ['who', 'which']" :key="tag" :class="{ active: isDistractorActive(tag) }"
+                  @click.prevent="toggleDistractor(tag)">
+                  {{ tag }}
+                </button>
+              </div>
+
+              <!-- 保留手動輸入給進階老師 -->
+              <input v-model="distractorsInput" type="text" placeholder="或手動輸入其他干擾磚 (用逗號隔開)" style="margin-top: 12px;"
                 @focus="activeUploadTarget = null" />
             </div>
 
@@ -548,13 +663,6 @@ const saveAllAndClose = () => {
                   @focus="activeUploadTarget = null" />
               </div>
             </template>
-
-            <!-- 句型 B -->
-            <div class="form-group" v-if="questionType === 'standard'">
-              <label>句型 B：介系詞片語</label>
-              <input v-model="prepositionSentence" type="text" placeholder="Ex: [in a blue uniform]"
-                @focus="activeUploadTarget = null" />
-            </div>
           </div>
 
           <div class="editor-footer">
@@ -568,7 +676,7 @@ const saveAllAndClose = () => {
 </template>
 
 <style scoped>
-/* 樣式保持不變，並補上拖拽把手樣式 */
+/* 樣式保持不變，並補上漏斗樣式與輸入框樣式 */
 .admin-modal {
   position: fixed;
   top: 0;
@@ -957,7 +1065,6 @@ const saveAllAndClose = () => {
   margin-left: auto;
 }
 
-/* 👈 拖拽把手樣式 */
 .drag-handle {
   cursor: grab;
   padding: 0 4px;
@@ -1125,5 +1232,123 @@ const saveAllAndClose = () => {
   background: white;
   color: #1cb0f6;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.distractor-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  background: #f9f9f9;
+  padding: 12px;
+  border-radius: 12px;
+  border: 2px solid #e5e5e5;
+}
+
+.distractor-tags button {
+  background: white;
+  border: 2px solid #ccc;
+  color: #777;
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.distractor-tags button:hover {
+  border-color: #1cb0f6;
+  color: #1cb0f6;
+}
+
+.distractor-tags button.active {
+  background: #e6f7ff;
+  border-color: #1cb0f6;
+  color: #1cb0f6;
+  box-shadow: 0 2px 4px rgba(28, 176, 246, 0.2);
+}
+
+.distractor-tags .divider {
+  width: 2px;
+  height: 20px;
+  background: #e5e5e5;
+  margin: 0 4px;
+}
+
+/* 👈 漏斗預覽樣式與可編輯輸入框 */
+.funnel-preview {
+  background: #f0f4f8;
+  border: 2px dashed #cbd5e1;
+  border-radius: 16px;
+  padding: 16px 24px;
+  margin-bottom: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: fadeIn 0.3s ease;
+}
+
+.funnel-title {
+  font-weight: bold;
+  color: #475569;
+  font-size: 0.9rem;
+  margin-bottom: 4px;
+}
+
+.funnel-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.funnel-label {
+  font-size: 0.85rem;
+  color: #64748b;
+  width: 100px;
+  flex-shrink: 0;
+}
+
+.funnel-input-kept {
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-weight: bold;
+  font-size: 1.05rem;
+  flex: 1;
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+  outline: none;
+  transition: all 0.2s;
+}
+
+.funnel-input-kept:focus {
+  border-color: #58cc02;
+  background: white;
+  box-shadow: 0 0 0 4px rgba(88, 204, 2, 0.2);
+}
+
+.funnel-value.discarded {
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-weight: bold;
+  font-size: 1.05rem;
+  flex: 1;
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 </style>

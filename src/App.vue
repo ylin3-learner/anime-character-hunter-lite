@@ -387,11 +387,13 @@ const logoutAdmin = () => {
       <div v-else-if="currentStage === 'micro'" class="stage-content">
         <h2 class="instruction">圖塊已解鎖！請排列出正確的字序。</h2>
         <div class="target-noun"><span class="highlight">{{ currentQuestion.targetNoun }}</span></div>
-        <MicroTileUnscramble
-          :initialTiles="currentQuestion.mode === 'reduce' ? currentQuestion.grammarFeature.relative.tiles : currentQuestion.grammarFeature[currentMode].tiles"
-          :antecedent="currentQuestion.antecedent"
-          :correctAnswer="currentQuestion.mode === 'reduce' ? currentQuestion.grammarFeature.preposition.correctAnswer : currentQuestion.grammarFeature[currentMode].correctAnswer"
-          :mode="currentQuestion.mode || 'build'" :contextCloze="currentQuestion.contextCloze"
+        <MicroTileUnscramble :initialTiles="currentQuestion.mode === 'reduce'
+            ? currentQuestion.grammarFeature.relative.correctAnswer  // 👈 Reduce 模式傳入原句順序
+            : currentQuestion.grammarFeature[currentMode].tiles      // Build 模式傳入打亂的
+          " :antecedent="currentQuestion.antecedent" :correctAnswer="currentQuestion.mode === 'reduce'
+                ? currentQuestion.grammarFeature.preposition.correctAnswer
+                : currentQuestion.grammarFeature[currentMode].correctAnswer
+              " :mode="currentQuestion.mode || 'build'" :contextCloze="currentQuestion.contextCloze"
           :speechRate="currentQuestion.speechRate || 0.8" @success="handleSuccess"
           @misconception="handleMisconception" />
       </div>
