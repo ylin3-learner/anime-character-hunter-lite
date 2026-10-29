@@ -18,9 +18,9 @@ import { useSound, unlockAudioContext } from './utils/useSound';
 import { unlockTTS } from './utils/useSpeech';
 import { CloudDatabase } from './services/CloudDatabase';
 
-// 👈 引入 Composables (請確保這兩個檔案已經建立)
 import { useQuizTimer } from './composables/useQuizTimer';
 import { useFocusMonitor } from './composables/useFocusMonitor';
+import { useClassroomSync } from './composables/useClassroomSync'; // 👈 引入 Realtime
 
 const isDebugMode = window.location.search.includes('debug=1');
 
@@ -32,7 +32,9 @@ const questionBank = ref<QuestionData[]>([]);
 const currentStage = ref<'preview' | 'input' | 'macro' | 'micro' | 'success' | 'noticing'>('preview');
 const currentMode = ref<'relative' | 'preposition'>('relative');
 
-// 引入音效 (包含新增的警告音)
+// 解構 Classroom Sync
+const { joinRoom, sendPush, sendAddTime, leaveRoom } = useClassroomSync();
+
 const { playSuccess, playError, playWarningBeep } = useSound();
 
 const showAdminAuth = ref(false);
@@ -47,23 +49,20 @@ const completedCount = ref(0);
 // ==========================================
 const showFocusWarning = ref(false);
 
-// 處理切屏分心
 const handleDistracted = () => {
-  playWarningBeep(); // 播放警告音
+  playWarningBeep();
   showFocusWarning.value = true;
-  setTimeout(() => { showFocusWarning.value = false; }, 3000); // 3秒後消失
+  setTimeout(() => { showFocusWarning.value = false; }, 3000);
 };
 
-// 啟動全局防切屏監控
 useFocusMonitor(handleDistracted);
 
-// 啟動計時器 (時間到時觸發 isTimeUp 為 true)
 const { timeLeft, isTimeUp, startTimer, addTime, clearTimer } = useQuizTimer(() => {
-  playError(); // 時間到播放錯誤音效
+  playError();
 });
 
 // ==========================================
-// 2. 初始化與音訊解鎖
+// 2. 初始化與 Realtime 連線
 // ==========================================
 const handleGlobalInteraction = () => {
   unlockAudioContext();
@@ -90,11 +89,35 @@ onMounted(async () => {
   }
   fixAntecedentNumbers();
   checkAndSetInitialStage();
+
+  // 👈 加入 Realtime 通道，接收老師發送的指令
+  joinRoom((event, payload) => {
+    if (event === 'TEACHER_PUSH') {
+      console.log('📡 收到老師發送題目:', payload);
+      const idx = questionBank.value.findIndex(q => q.id === payload.id);
+      if (idx !== -1) {
+        questionBank.value[idx] = JSON.parse(JSON.stringify(payload));
+        currentIndex.value = idx;
+        checkAndSetInitialStage();
+
+        if (payload.isTimed && payload.timeLimit) {
+          startTimer(payload.timeLimit);
+        } else {
+          clearTimer();
+        }
+      }
+    }
+    if (event === 'TEACHER_ADD_TIME') {
+      console.log('📡 收到老師加時:', payload.seconds);
+      addTime(payload.seconds);
+    }
+  });
 });
 
 onUnmounted(() => {
   document.removeEventListener('pointerdown', handleGlobalInteraction);
   document.removeEventListener('touchstart', handleGlobalInteraction);
+  leaveRoom(); // 👈 離開房間
 });
 
 const fixAntecedentNumbers = () => {
@@ -111,20 +134,15 @@ const fixAntecedentNumbers = () => {
 const currentQuestion = computed(() => questionBank.value[currentIndex.value] || (defaultQuestions[0] as unknown as QuestionData));
 const getEnabledStages = computed(() => currentQuestion.value.enabledStages || ['input', 'macro', 'micro', 'pronunciation', 'noticing']);
 
-// 👈 精準監聽：只有題目 ID、限時設定或當前階段改變時，才控制計時器
 watch(
   [() => currentQuestion.value?.id, () => currentQuestion.value?.timeLimit, () => currentQuestion.value?.isTimed, currentStage],
   ([newId, newTimeLimit, isTimed, newStage], [oldId, oldTimeLimit, oldIsTimed, oldStage]) => {
     const isTestingPhase = ['input', 'macro', 'micro'].includes(newStage);
-
-    // 如果進入測驗階段，且這題有限時
     if (isTestingPhase && isTimed && newTimeLimit) {
-      // 只有當題目切換、時間被改、或剛進入測驗階段時，才啟動計時器
       if (newId !== oldId || newTimeLimit !== oldTimeLimit || (!['input', 'macro', 'micro'].includes(oldStage || '') && isTestingPhase)) {
         startTimer(newTimeLimit);
       }
     } else {
-      // 如果離開測驗階段或題目被改為不限時，清除計時器
       if (!isTestingPhase || !isTimed) {
         clearTimer();
       }
@@ -178,7 +196,7 @@ const handleNoticingComplete = () => {
 const restartGame = () => { currentIndex.value = 0; sessionLog.value = []; completedCount.value = 0; showSummary.value = false; checkAndSetInitialStage(); };
 
 // ==========================================
-// 4. 老師端指令處理
+// 4. 老師端指令處理 (Master)
 // ==========================================
 const updateQuestionBank = async (updatedQuestions: QuestionData[]) => {
   const currentIdx = currentIndex.value;
@@ -186,7 +204,6 @@ const updateQuestionBank = async (updatedQuestions: QuestionData[]) => {
   fixAntecedentNumbers();
   showAdmin.value = false;
 
-  // 防越界保護：如果老師刪了題目，導致原本的索引越界，則退回最後一題
   if (currentIdx >= questionBank.value.length) {
     currentIndex.value = Math.max(0, questionBank.value.length - 1);
   } else {
@@ -198,16 +215,15 @@ const updateQuestionBank = async (updatedQuestions: QuestionData[]) => {
   if (!success) alert('注意：題庫已存在本機，但「雲端同步失敗」，請確認網路連線。');
 };
 
-// 這個函數只更新記憶體狀態，不呼叫 Supabase
 const handleLocalSync = (updatedQuestions: QuestionData[]) => {
   questionBank.value = updatedQuestions;
-  console.log('🔄 [App.vue] 記憶體題庫已同步更新');
 };
 
-// 2. handlePushQuestion 保持我們上一版的寫法（重新計時）
+// 接收 TeacherAdmin 的 push 事件，並廣播給全班
 const handlePushQuestion = (id: string) => {
   const idx = questionBank.value.findIndex(q => q.id === id);
   if (idx !== -1) {
+    // 此時 questionBank 已經被 sync-local 更新過了，拿到的 targetQ 絕對是最新的
     const targetQ = questionBank.value[idx];
     console.log(`🚀 [Push] 準備跳轉到第 ${idx + 1} 題。預設秒數: ${targetQ.timeLimit}`);
 
@@ -222,13 +238,19 @@ const handlePushQuestion = (id: string) => {
     } else {
       clearTimer();
     }
+    
+    // 廣播給全班 (傳遞最新的 targetQ)
+    sendPush(targetQ);
   }
 };
 
-// 👈 處理超時，強制進入下一題
-const handleTimeoutNext = () => {
-  nextQuestion();
+// 新增：處理加時（本地 UI 更新 + Realtime 廣播）
+const handleAddTime = (seconds: number) => {
+  addTime(seconds);      // 1. 本地裝置（Master）先加時
+  sendAddTime(seconds);  // 2. 廣播給所有 Slave 裝置同步加時
 };
+
+const handleTimeoutNext = () => { nextQuestion(); };
 
 const openAdmin = () => { if (isAdminAuthenticated.value) showAdmin.value = true; else { pendingAction.value = 'admin'; showAdminAuth.value = true; } };
 const openAnalytics = () => { if (isAdminAuthenticated.value) showAnalytics.value = true; else { pendingAction.value = 'analytics'; showAdminAuth.value = true; } };
@@ -245,7 +267,6 @@ const cancelAuth = () => { showAdminAuth.value = false; adminPasswordInput.value
 
 <template>
   <div class="app-container">
-    <!-- 👈 全局防切屏警告 -->
     <Transition name="fade">
       <div v-if="showFocusWarning" class="focus-warning-overlay">
         <div class="warning-box">
@@ -255,15 +276,12 @@ const cancelAuth = () => { showAdminAuth.value = false; adminPasswordInput.value
       </div>
     </Transition>
 
-    <!-- 👈 限時倒數條 -->
     <div v-if="currentQuestion.isTimed && !isTimeUp && ['input', 'macro', 'micro'].includes(currentStage)"
       class="timer-bar" :class="{ 'urgent': timeLeft <= 10 }">
       ⏱️ 剩餘時間：{{ timeLeft }} 秒
-      <!-- 👈 關鍵修正：只有老師驗證通過才顯示 +30s 按鈕 -->
-      <button v-if="isAdminAuthenticated" class="btn-add-time" @click="addTime(30)">+30s</button>
+      <button v-if="isAdminAuthenticated" class="btn-add-time" @click="handleAddTime(30)">+30s</button>
     </div>
 
-    <!-- 👈 超時阻塞遮罩 -->
     <Transition name="fade">
       <div v-if="isTimeUp" class="timeout-overlay">
         <div class="timeout-box">
@@ -362,6 +380,7 @@ const cancelAuth = () => { showAdminAuth.value = false; adminPasswordInput.value
       </div>
     </div>
 
+    <!-- 👈 確保這裡傳遞了正確的事件 -->
     <TeacherAdmin v-if="showAdmin" :currentQuestions="questionBank" @update="updateQuestionBank"
       @sync-local="handleLocalSync" @push="handlePushQuestion" @close="showAdmin = false" />
 
@@ -370,9 +389,7 @@ const cancelAuth = () => { showAdminAuth.value = false; adminPasswordInput.value
 </template>
 
 <style scoped>
-/* ==========================================
-   原本的排版與核心樣式 (已補回)
-   ========================================== */
+/* 樣式保持不變 */
 .app-container {
   max-width: 800px;
   margin: 0 auto;
@@ -655,9 +672,6 @@ header h1 {
   transform: translateY(4px);
 }
 
-/* ==========================================
-   新增的防切屏與計時器樣式
-   ========================================== */
 .focus-warning-overlay {
   position: fixed;
   top: 0;

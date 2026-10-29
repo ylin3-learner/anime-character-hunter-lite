@@ -10,14 +10,13 @@ const questionMode = ref<'build' | 'reduce'>('build');
 const isQuestionsExpanded = ref(true);
 const speechRate = ref<number>(0.8);
 
-// 👈 題目節奏模式
 const isTimedForm = ref(false);
 const timeLimitForm = ref<number>(60);
 
 const emit = defineEmits<{
   (e: 'update', questions: QuestionData[]): void;
-  (e: 'sync-local', questions: QuestionData[]): void; // 👈 靜默同步事件
-  (e: 'push', id: string): void;
+  (e: 'sync-local', questions: QuestionData[]): void;
+  (e: 'push', id: string): void; // 改回 id: string
   (e: 'close'): void;
 }>();
 
@@ -264,6 +263,10 @@ const saveQuestion = () => {
   } else {
     localQuestions.value.push(newQuestion);
   }
+  resetItemHighlight();
+};
+
+const resetItemHighlight = () => {
   resetForm();
 };
 
@@ -272,8 +275,10 @@ const handleSaveAndPush = (id: string) => {
     saveQuestion();
   }
   setTimeout(() => {
+    // 1. 先將最新題庫（含新秒數）同步給 App.vue
     emit('sync-local', localQuestions.value);
-    emit('push', id);
+    // 2. 再發送題目 ID 觸發跳轉
+    emit('push', id); 
   }, 50);
 };
 
@@ -300,10 +305,15 @@ const saveAllAndClose = () => {
             </div>
             <div v-show="isQuestionsExpanded" style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
               <div class="question-list">
-                <VueDraggable v-model="localQuestions" :animation="150" ghostClass="ghost" class="question-list-inner">
+                <!-- 👈 加上 handle=".drag-handle" 屬性 -->
+                <VueDraggable v-model="localQuestions" :animation="150" ghostClass="ghost" handle=".drag-handle"
+                  class="question-list-inner">
                   <div v-for="(q, index) in localQuestions" :key="q.id" class="question-item"
                     :class="{ active: editingId === q.id }" @click="editQuestion(q)">
+
                     <div class="q-index">
+                      <!-- 👈 拖拽把手圖示 -->
+                      <div class="drag-handle" title="按住拖曳排序">⋮⋮</div>
                       第 {{ index + 1 }} 關
                       <span class="q-type-tag" :class="q.type">{{ q.type === 'contrast' ? '對比題' : q.type === 'chunk' ?
                         '片語題' : '標準題' }}</span>
@@ -409,11 +419,8 @@ const saveAllAndClose = () => {
 
             <!-- 圖片上傳區 -->
             <div class="form-group">
-              <label>
-                {{ questionType === 'contrast' ? '名詞圖片 (拼圖右側)'
-                  : questionType === 'chunk' ? '片語情境圖片'
-                    : '正確角色圖片' }}
-              </label>
+              <label>{{ questionType === 'contrast' ? '名詞圖片 (拼圖右側)' : questionType === 'chunk' ? '片語情境圖片' : '正確角色圖片'
+                }}</label>
               <div class="upload-area" :class="{ 'active-upload': activeUploadTarget === 'noun' }"
                 @click="triggerUpload('noun')">
                 <img v-if="imageUrl" :src="imageUrl" class="preview-img" />
@@ -561,7 +568,7 @@ const saveAllAndClose = () => {
 </template>
 
 <style scoped>
-/* 樣式保持不變，請直接貼上你原有的 style 即可 */
+/* 樣式保持不變，並補上拖拽把手樣式 */
 .admin-modal {
   position: fixed;
   top: 0;
@@ -948,6 +955,19 @@ const saveAllAndClose = () => {
   background: #e6f7e6;
   color: #58cc02;
   margin-left: auto;
+}
+
+/* 👈 拖拽把手樣式 */
+.drag-handle {
+  cursor: grab;
+  padding: 0 4px;
+  font-size: 1.2rem;
+  color: #ccc;
+  user-select: none;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
 }
 
 .q-actions {
