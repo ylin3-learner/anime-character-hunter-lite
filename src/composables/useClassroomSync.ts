@@ -7,7 +7,6 @@ export function useClassroomSync() {
     const joinRoom = (onReceive: (event: string, payload: any) => void) => {
         if (channel) return;
 
-        // 👈 改用 postgres_changes 監聽資料庫變更
         channel = supabase.channel('classroom_db_changes')
             .on(
                 'postgres_changes',
@@ -15,10 +14,19 @@ export function useClassroomSync() {
                 (payload) => {
                     console.log('📡 [Sync] 偵測到資料庫狀態更新:', payload.new);
                     const newState = payload.new;
-                    if (newState.current_question_id) {
+                    const oldState = payload.old;
+
+                    // 如果題目 ID 變了，觸發跳題
+                    if (newState.current_question_id !== oldState.current_question_id) {
                         onReceive('TEACHER_PUSH', {
                             id: newState.current_question_id,
                             timerEndTime: newState.timer_end_time
+                        });
+                    }
+                    // 如果題目沒變，但結束時間變了，觸發加時
+                    else if (newState.timer_end_time !== oldState.timer_end_time) {
+                        onReceive('TEACHER_ADD_TIME', {
+                            newEndTime: newState.timer_end_time
                         });
                     }
                 }
@@ -26,20 +34,18 @@ export function useClassroomSync() {
             .subscribe((status) => {
                 if (status === 'SUBSCRIBED') {
                     console.log('✅ [Sync] 已連線至資料庫變更監聽');
-                    syncState(onReceive); // 連線成功時主動拉取一次
+                    syncState(onReceive);
                 }
             });
 
-        // 切回分頁時主動拉取
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden) syncState(onReceive);
         });
     };
 
-    // 👈 主動向資料庫拉取最新狀態（解決斷線/休眠問題）
     const syncState = async (onReceive: (event: string, payload: any) => void) => {
-        const { data } = await supabase.from('classroom_state').select('*').eq('id', 'current_state').single();
-        if (data && data.current_question_id) {
+        const { data, error } = await supabase.from('classroom_state').select('*').eq('id', 'current_state').single();
+        if (data && data.current_question_id && !error) {
             onReceive('TEACHER_PUSH', {
                 id: data.current_question_id,
                 timerEndTime: data.timer_end_time
@@ -47,17 +53,13 @@ export function useClassroomSync() {
         }
     };
 
-    // 👈 老師端：呼叫 Edge Function 發送指令
+    // ... sendPush 與 sendAddTime 保持不變 ...
     const sendPush = async (q: any, endTime: number | null, password: string) => {
         const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
         await fetch(`${supabaseUrl}/functions/v1/teacher-action`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                password,
-                action: 'PUSH_QUESTION',
-                payload: { questionId: q.id, timerEndTime: endTime }
-            })
+            body: JSON.stringify({ password, action: 'PUSH_QUESTION', payload: { questionId: q.id, timerEndTime: endTime } })
         });
     };
 
@@ -66,19 +68,12 @@ export function useClassroomSync() {
         await fetch(`${supabaseUrl}/functions/v1/teacher-action`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                password,
-                action: 'ADD_TIME',
-                payload: { newEndTime }
-            })
+            body: JSON.stringify({ password, action: 'ADD_TIME', payload: { newEndTime } })
         });
     };
 
     const leaveRoom = () => {
-        if (channel) {
-            supabase.removeChannel(channel);
-            channel = null;
-        }
+        if (channel) { supabase.removeChannel(channel); channel = null; }
     };
 
     return { joinRoom, sendPush, sendAddTime, leaveRoom };
