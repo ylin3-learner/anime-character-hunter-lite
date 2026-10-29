@@ -4,59 +4,82 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 let channel: RealtimeChannel | null = null;
 
 export function useClassroomSync() {
-  // 初始化並加入房間
-  const joinRoom = (onReceive: (event: string, payload: any) => void) => {
-    if (channel) return; // 避免重複訂閱
+    const joinRoom = (onReceive: (event: string, payload: any) => void) => {
+        if (channel) return;
 
-    channel = supabase.channel('classroom_sync_room', {
-      config: {
-        broadcast: { ack: false, self: true }, // self: true 讓本地端也能收到自己發的訊息
-      },
-    });
+        // 👈 改用 postgres_changes 監聽資料庫變更
+        channel = supabase.channel('classroom_db_changes')
+            .on(
+                'postgres_changes',
+                { event: 'UPDATE', schema: 'public', table: 'classroom_state' },
+                (payload) => {
+                    console.log('📡 [Sync] 偵測到資料庫狀態更新:', payload.new);
+                    const newState = payload.new;
+                    if (newState.current_question_id) {
+                        onReceive('TEACHER_PUSH', {
+                            id: newState.current_question_id,
+                            timerEndTime: newState.timer_end_time
+                        });
+                    }
+                }
+            )
+            .subscribe((status) => {
+                if (status === 'SUBSCRIBED') {
+                    console.log('✅ [Sync] 已連線至資料庫變更監聽');
+                    syncState(onReceive); // 連線成功時主動拉取一次
+                }
+            });
 
-    channel
-      .on('broadcast', { event: 'TEACHER_PUSH' }, (payload) => {
-        console.log('📡 [Sync] 收到老師發送的指令:', payload);
-        onReceive('TEACHER_PUSH', payload.payload);
-      })
-      .on('broadcast', { event: 'TEACHER_ADD_TIME' }, (payload) => {
-        console.log('📡 [Sync] 收到老師加時指令:', payload);
-        onReceive('TEACHER_ADD_TIME', payload.payload);
-      })
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('✅ [Sync] 已連線到課堂即時同步通道');
+        // 切回分頁時主動拉取
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) syncState(onReceive);
+        });
+    };
+
+    // 👈 主動向資料庫拉取最新狀態（解決斷線/休眠問題）
+    const syncState = async (onReceive: (event: string, payload: any) => void) => {
+        const { data } = await supabase.from('classroom_state').select('*').eq('id', 'current_state').single();
+        if (data && data.current_question_id) {
+            onReceive('TEACHER_PUSH', {
+                id: data.current_question_id,
+                timerEndTime: data.timer_end_time
+            });
         }
-      });
-  };
+    };
 
-  // 老師端發送指令
-  const sendPush = (q: any) => {
-    if (channel) {
-      channel.send({
-        type: 'broadcast',
-        event: 'TEACHER_PUSH',
-        payload: q,
-      });
-    }
-  };
+    // 👈 老師端：呼叫 Edge Function 發送指令
+    const sendPush = async (q: any, endTime: number | null, password: string) => {
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        await fetch(`${supabaseUrl}/functions/v1/teacher-action`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                password,
+                action: 'PUSH_QUESTION',
+                payload: { questionId: q.id, timerEndTime: endTime }
+            })
+        });
+    };
 
-  const sendAddTime = (seconds: number) => {
-    if (channel) {
-      channel.send({
-        type: 'broadcast',
-        event: 'TEACHER_ADD_TIME',
-        payload: { seconds },
-      });
-    }
-  };
+    const sendAddTime = async (newEndTime: number, password: string) => {
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        await fetch(`${supabaseUrl}/functions/v1/teacher-action`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                password,
+                action: 'ADD_TIME',
+                payload: { newEndTime }
+            })
+        });
+    };
 
-  const leaveRoom = () => {
-    if (channel) {
-      supabase.removeChannel(channel);
-      channel = null;
-    }
-  };
+    const leaveRoom = () => {
+        if (channel) {
+            supabase.removeChannel(channel);
+            channel = null;
+        }
+    };
 
-  return { joinRoom, sendPush, sendAddTime, leaveRoom };
+    return { joinRoom, sendPush, sendAddTime, leaveRoom };
 }

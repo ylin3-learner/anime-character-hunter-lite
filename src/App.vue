@@ -90,26 +90,27 @@ onMounted(async () => {
   fixAntecedentNumbers();
   checkAndSetInitialStage();
 
-  // 👈 加入 Realtime 通道，接收老師發送的指令
   joinRoom((event, payload) => {
     if (event === 'TEACHER_PUSH') {
       console.log('📡 收到老師發送題目:', payload);
       const idx = questionBank.value.findIndex(q => q.id === payload.id);
       if (idx !== -1) {
-        questionBank.value[idx] = JSON.parse(JSON.stringify(payload));
         currentIndex.value = idx;
         checkAndSetInitialStage();
 
-        if (payload.isTimed && payload.timeLimit) {
-          startTimer(payload.timeLimit);
+        if (payload.timerEndTime) {
+          // 👈 計算剩餘秒數
+          const remaining = Math.max(0, Math.floor((payload.timerEndTime - Date.now()) / 1000));
+          startTimer(remaining);
         } else {
           clearTimer();
         }
       }
     }
     if (event === 'TEACHER_ADD_TIME') {
-      console.log('📡 收到老師加時:', payload.seconds);
-      addTime(payload.seconds);
+      console.log('📡 收到老師加時:', payload);
+      const remaining = Math.max(0, Math.floor((payload.newEndTime - Date.now()) / 1000));
+      startTimer(remaining); // 直接重設為新的剩餘時間
     }
   });
 });
@@ -223,31 +224,37 @@ const handleLocalSync = (updatedQuestions: QuestionData[]) => {
 const handlePushQuestion = (id: string) => {
   const idx = questionBank.value.findIndex(q => q.id === id);
   if (idx !== -1) {
-    // 此時 questionBank 已經被 sync-local 更新過了，拿到的 targetQ 絕對是最新的
     const targetQ = questionBank.value[idx];
-    console.log(`🚀 [Push] 準備跳轉到第 ${idx + 1} 題。預設秒數: ${targetQ.timeLimit}`);
-
     currentIndex.value = idx;
     checkAndSetInitialStage();
     showAdmin.value = false;
 
+    let endTime = null;
     if (targetQ.isTimed && targetQ.timeLimit) {
-      setTimeout(() => {
-        startTimer(targetQ.timeLimit!);
-      }, 150);
+      endTime = Date.now() + targetQ.timeLimit * 1000;
+      startTimer(targetQ.timeLimit);
     } else {
       clearTimer();
     }
     
-    // 廣播給全班 (傳遞最新的 targetQ)
-    sendPush(targetQ);
+    // 👈 呼叫 API 發送指令，並帶上老師的驗證密碼
+    const pwd = sessionStorage.getItem('admin_auth') ? 'admin123' : '';
+    sendPush(targetQ, endTime, pwd);
   }
 };
 
 // 新增：處理加時（本地 UI 更新 + Realtime 廣播）
 const handleAddTime = (seconds: number) => {
-  addTime(seconds);      // 1. 本地裝置（Master）先加時
-  sendAddTime(seconds);  // 2. 廣播給所有 Slave 裝置同步加時
+  // 1. 本地先加
+  addTime(seconds); 
+  
+  // 2. 計算新的結束時間並廣播
+  // 注意：這裡需要拿到目前計時器的剩餘時間來推算新的 endTime
+  // 但最簡單的方式是：直接廣播一個新的結束時間
+  const newEndTime = Date.now() + (timeLeft.value + seconds) * 1000;
+  
+  const pwd = sessionStorage.getItem('admin_auth') ? 'admin123' : '';
+  sendAddTime(newEndTime, pwd);
 };
 
 const handleTimeoutNext = () => { nextQuestion(); };
