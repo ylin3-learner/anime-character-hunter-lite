@@ -1,3 +1,6 @@
+### 2. `README.zh-TW.md` (繁體中文版)
+
+```markdown
 # 🕵️ Anime Character Hunter Lite（動漫角色大搜尋）
 
 **[English](README.md) | [繁體中文](README.zh-TW.md)**
@@ -8,66 +11,150 @@
 
 整體設計對應一節 45 分鐘的**國三（115 iE5 Unit 5：*The Man Who Shook Hands with Me Is My Favorite Star*）**課程。
 
+---
+
 ## 🧠 認知歷程管線（以教學理論驅動的設計）
 
 本工具建立在第二語言習得（SLA）理論上，包含三種獨立的題型，帶領學生完成認知循環：
 
-1. **片語預習與測驗 (Chunk Phrase Quiz)**：學生看圖聽發音，從相似片語中選出正確的，建立「形式與意義的連結」。
+```mermaid
+flowchart TD
+    Start((開始)) --> Preview
+    
+    subgraph Presentation ["1. 輸入與鷹架"]
+        Preview["🔍 片語預覽<br>建立形式與意義連結"]
+        Input["🎧 聽力輸入<br>測試聽覺理解"]
+        Preview --> Input
+    end
+
+    Input --> Macro
+    
+    subgraph Practice ["2. 空間與形式"]
+        Macro["🧩 巨觀拖拉<br>建立後位修飾空間感"]
+        Micro["🧱 字磚重組<br>系統偵測文法迷思"]
+        Macro --> Micro
+    end
+
+    Micro --> Output
+    
+    subgraph Production ["3. 產出與反思"]
+        Output["🗣️ 語音練習<br>STT 比對發音"]
+        Noticing["💡 意識提升<br>自我歸納文法"]
+        Output --> Noticing
+    end
+
+    Noticing --> End((完成關卡))
+
+    %% 行為主義反饋
+    Focus["⚠️ 防切屏 Beep 聲"] -.-> Practice
+    Timer["⏱️ 限時壓力"] -.-> Practice
+    Data["📊 即時錯誤軌跡"] -.-> Teacher((教師數據儀表板))
+    Micro -.-> Data
+```
+
+1. **片語預習與測驗 (Chunk Phrase Quiz)**：學生看圖聽發音，從相似片語中選出正確的。
 2. **空間建構 (Contrast Puzzle)**：學生親手把拼圖塊拖過中線，建立英文後位修飾的空間語序感。
-3. **標準題 (Standard Question)**：
-   - **輸入處理**：聽句子選圖片。
-   - **聚焦形式**：排列字磚，系統自動偵測文法迷思。
-   - **韻律與輸出**：採用**跨平台混合式語音架構**（詳見下節）。
-   - **意識提升**：透過解說卡與 Noticing Board 自行歸納文法規則。
+3. **標準題 (Standard Question)**：包含聽力輸入、聚焦形式、語音輸出與意識提升。
 
-## 🎙️ 跨平台混合式語音架構 (Hybrid TTS & STT)
+---
 
-為了確保在 iPad、一般電腦、以及**沒有語音包的智慧白板**上都能 100% 穩定運作，本專案實作了基於 Supabase Edge Functions 的**降級備援機制**。
+## 🏗️ 系統架構圖 (System Architecture)
+
+本系統具備高度解耦特性，透過 **Supabase** 作為中樞，將前端 Vue 3 應用、教師端、以及外部的 AI 語音服務完美串接。
 
 ```mermaid
 graph TD
-    subgraph Frontend ["前端 (Vue 3)"]
-        TTS_Req["TTS 請求 (文字 + 語速)"]
-        TTS_Check{"系統是否有\n語音包？"}
-        NativeTTS["原生 Web Speech API\n(隨機選擇語音)"]
-        EdgeTTS_API["呼叫 Supabase Edge Function"]
+    subgraph Client ["前端 (Vue 3 + TypeScript)"]
+        direction TB
+        AdminUI["👩‍🏫 教師備課中心<br>(TeacherAdmin.vue)"]
+        StudentUI["👨‍🎓 學生學習介面<br>(App.vue)"]
         
-        STT_Req["STT 請求 (錄音檔)"]
-        STT_API["呼叫 Supabase Edge Function"]
+        subgraph Composables ["核心邏輯 (Composables)"]
+            Timer["⏱️ useQuizTimer<br>(絕對時間戳倒數)"]
+            Focus["👁️ useFocusMonitor<br>(防切屏監控)"]
+            Sound["🔊 useSound<br>(Web Audio 音效)"]
+            Speech["🗣️ useSpeech<br>(跨平台語音代理)"]
+        end
     end
 
-    subgraph Supabase ["Supabase 後端"]
-        Edge_TTS["edge-tts (Deno)"]
-        Cache{"檢查 Storage\n(MD5 快取)"}
-        MS_TTS["微軟 Edge TTS API\n(高音質神經網路語音)"]
-        Storage[("Supabase Storage\n(tts-audio bucket)")]
+    subgraph Supabase ["Supabase 雲端後端"]
+        DB[("PostgreSQL<br>(題庫與學習軌跡)")]
+        Storage[("Storage<br>(圖片與音檔快取)")]
         
-        Edge_STT["edge-stt (Deno)"]
+        subgraph EdgeFunctions ["Edge Functions (Deno)"]
+            TTS_Proxy["deepgram-tts<br>(Deepgram TTS)"]
+            STT_Proxy["edge-stt<br>(Deepgram STT)"]
+        end
     end
 
     subgraph ThirdParty ["第三方 API"]
-        Deepgram["Deepgram STT API"]
+        Deepgram["Deepgram API"]
     end
 
-    %% TTS 流程
-    TTS_Req --> TTS_Check
-    TTS_Check -- 有 (如 iPad) --> NativeTTS
-    TTS_Check -- 沒有 (如智慧白板) --> EdgeTTS_API
-    EdgeTTS_API --> Edge_TTS
-    Edge_TTS --> Cache
-    Cache -- 已存在 (極速) --> Storage
-    Cache -- 不存在 --> MS_TTS
-    MS_TTS --> Edge_TTS
-    Edge_TTS --> Storage
+    %% 資料流
+    AdminUI -- "發送指令 / 同步題庫" --> StudentUI
+    StudentUI -- "CRUD 題目/軌跡" --> DB
+    AdminUI -- "CRUD 題目" --> DB
     
-    %% STT 流程
-    STT_Req --> STT_API
-    STT_API --> Edge_STT
-    Edge_STT --> Deepgram
+    StudentUI -- "語音合成請求" --> TTS_Proxy
+    TTS_Proxy --> Deepgram
+    TTS_Proxy -- "儲存快取" --> Storage
+    
+    StudentUI -- "語音辨識請求" --> STT_Proxy
+    STT_Proxy --> Deepgram
+
+    %% 邏輯依賴
+    StudentUI -.-> Composables
+    AdminUI -.-> Speech
 ```
 
-- **文字轉語音 (TTS)**：優先偵測系統原生語音包（並隨機選擇男女聲）。若無語音包（如 Windows 白板），則自動呼叫 `edge-tts` 代理，取得微軟高音質 AI 語音，並以 MD5 雜湊儲存於 Supabase Storage 作為快取。
+---
+
+## 🎙️ 跨平台混合式語音架構 (Hybrid TTS & STT)
+
+為了確保在 iPad、一般電腦、以及**沒有語音包的智慧白板**上都能 100% 穩定運作，本專案實作了基於 Supabase Edge Functions 的降級備援機制。
+
+- **文字轉語音 (TTS)**：優先偵測系統原生語音包（並隨機選擇男女聲）。若無語音包（如 Windows 白板），則自動呼叫 `deepgram-tts` 代理，取得高音質 AI 語音。
 - **語音轉文字 (STT)**：完全繞過瀏覽器 Web Speech API 的限制（如 Safari 的 `service-not-allowed`），將錄音檔傳送至 `edge-stt` 代理，交由 **Deepgram** 進行精準辨識。
+
+---
+
+## ⚡ 即時課堂互動時序圖 (Real-time Classroom Flow)
+
+這張圖展示了最核心的「教師掌控」與「學生防作弊」機制，包含靜默同步與強制重置計時器。
+
+```mermaid
+sequenceDiagram
+    participant T as 👩‍🏫 老師
+    participant A as 🖥️ App 狀態
+    participant Timer as ⏱️ 計時引擎
+    participant S as 👨‍🎓 學生畫面
+    participant Browser as 🌐 瀏覽器 API
+
+    Note over T,S: 情境：老師在後台將題目改為 60 秒，並點擊發送
+    
+    T->>T: 修改秒數 (90s -> 60s)
+    T->>T: 點擊「🚀 發送給全班」
+    T->>A: 1. Emit 'sync-local' (靜默更新)
+    T->>A: 2. Emit 'push' (發送題目 ID)
+    
+    A->>A: 替換 questionBank 為最新狀態
+    A->>A: currentIndex 切換至目標題目
+    A->>Timer: 3. 強制啟動 startTimer(60)
+    Timer-->>S: 畫面顯示倒數 60 秒
+
+    Note over S,Browser: 情境：學生試圖切換分頁偷看答案
+    
+    Browser->>A: 觸發 visibilitychange (分頁隱藏)
+    A->>A: 觸發 handleDistracted()
+    A->>S: 播放尖銳 Beep 聲 + 顯示紅框警告
+    Note right of Timer: ⚠️ 絕對時間戳持續倒數<br>切換分頁無法暫停時間
+    
+    Timer-->>S: 時間到！觸發 isTimeUp = true
+    A->>S: 顯示超時阻塞遮罩，強制中斷作答
+```
+
+---
 
 ## ✨ 主要功能
 
@@ -75,19 +162,21 @@ graph TD
 - **片語塊視覺化**：多字片語（如 `[in a blue uniform]`）顯示為不可分割的藍色磚塊。
 - **隨機語音輸入**：每次播放皆會從語音池中隨機選擇不同聲音，增加聽力豐富度。
 - **即時引導式回饋**：文法錯誤時以紅字標示並搖晃。
-- **文字比對發音面板**：透過 Deepgram 辨識發音，精準畫線標示漏讀單字。若網路斷線，具備優雅的降級回放機制。
+- **文字比對發音面板**：透過 Deepgram 辨識發音，精準畫線標示漏讀單字。
 
 ### 給老師（Teacher Admin）
 - **三大獨立題型**：標準題、對比題、片語題。
-- **免寫程式的出題器**：用 `[ ]` 包住片語即可產生字磚；支援自訂克漏字上下文與 0.5 / 0.8 / 1.0 三段語速設定。
+- **課堂節奏掌控**：可針對每題切換「自由進度」(🟢) 或「限時挑戰」(🔴)，並能一鍵將特定題目推送到全班。
 - **全班分析儀表板**：將錯誤事件彙整成即時圖表。
+
+---
 
 ## 🔬 診斷規則引擎
 
 學生的錯誤會被歸類為**診斷碼**。文法規則是純函式，位於 `src/rules/grammarRules.ts`。
 
 | 診斷碼 | 觸發情境 | 教學診斷意義 |
-|---|---|---|
+| :--- | :--- | :--- |
 | `DUPLICATE_PRONOUN` | *who / which / that* 後面緊接主格代名詞。 | 學生尚未理解關代已代替先行詞。 |
 | `SV_AGREEMENT` | 關代後的動詞與先行詞單複數不一致。 | 尚未掌握關係子句內的動詞呼應。 |
 | `WRONG_RELATIVE` | 先行詞是物卻用 *who*，或人卻用 *which*。 | 無法依先行詞類型選擇關代。 |
@@ -96,13 +185,16 @@ graph TD
 | `WRONG_ORDER` | 文法正確但字序錯誤。 | 語序錯亂或選錯連接詞。 |
 | `PUZZLE_ERROR` | 拼圖塊未對準目標槽位。 | 缺乏後位修飾的空間位置感。 |
 
+---
+
 ## 🛠️ 技術棧與工程
 
 - **前端**：Vue 3（Composition API）+ Vite + TypeScript
 - **後端與資料庫**：Supabase（PostgreSQL、Storage、Edge Functions）
-- **語音合成 (TTS)**：Web Speech API + 微軟 Edge TTS（雲端降級備援）
-- **語音辨識 (STT)**：Deepgram API（透過 Supabase Edge Function 代理）
+- **語音 (TTS & STT)**：Deepgram API（透過 Edge Function 代理）+ Web Speech API 降級備援
 - **拖曳**：原生 Pointer Events 與 `vue-draggable-plus`
+
+---
 
 ## 🚀 快速開始
 
@@ -117,7 +209,7 @@ VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 1. 建立名為 `tts-audio` 的 **Public** Storage bucket。
 2. 部署 Edge Functions：
    ```bash
-   npx supabase functions deploy edge-tts
+   npx supabase functions deploy deepgram-tts
    npx supabase functions deploy edge-stt
    ```
 3. 設定 Deepgram API Key：
@@ -131,6 +223,8 @@ npm install
 npm run dev
 npm test
 ```
+
+---
 
 ## 📚 教學理論參考
 - 處理教學法（Processing Instruction, PI）：VanPatten (1996)
