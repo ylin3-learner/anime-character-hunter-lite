@@ -9,20 +9,32 @@ const props = defineProps<{ currentQuestions: QuestionData[]; }>();
 const enabledStages = ref<('input' | 'macro' | 'micro' | 'pronunciation' | 'noticing')[]>(['input', 'macro', 'micro', 'pronunciation', 'noticing']);
 const questionMode = ref<'build' | 'reduce'>('build');
 const isQuestionsExpanded = ref(true);
+
+// 👈 新增：控制班級控制面板的收合狀態
+const isClassPanelExpanded = ref(true);
+
 const speechRate = ref<number>(0.8);
 
 const isTimedForm = ref(false);
 const timeLimitForm = ref<number>(60);
 
-//  新增：班級控制狀態
 const isClassModeToggle = ref(false);
 const targetCountInput = ref(30);
 const { updateClassMode, sendResetProgress } = useClassroomSync();
 
+// 當題目模式切換為 Reduce 時，自動移除巨觀拖拉 (macro) 階段
+watch(questionMode, (newMode) => {
+  if (newMode === 'reduce') {
+    enabledStages.value = enabledStages.value.filter(stage => stage !== 'macro');
+  } else if (newMode === 'build' && !enabledStages.value.includes('macro')) {
+    enabledStages.value.unshift('macro'); // 切回 Build 時加回來
+  }
+});
+
 const emit = defineEmits<{
   (e: 'update', questions: QuestionData[]): void;
   (e: 'sync-local', questions: QuestionData[]): void;
-  (e: 'push', id: string): void; //  確保這裡是 id: string
+  (e: 'push', id: string): void;
   (e: 'close'): void;
 }>();
 
@@ -62,7 +74,6 @@ const uploadTarget = ref<'noun' | 'distractor' | 'modifier'>('noun');
 const activeUploadTarget = ref<'noun' | 'distractor' | 'modifier' | null>(null);
 const isEditing = computed(() => editingId.value !== null);
 
-//  新增：處理班級模式切換
 const handleModeChange = () => {
   const pwd = sessionStorage.getItem('admin_auth') ? 'admin123' : '';
   updateClassMode(isClassModeToggle.value, targetCountInput.value, pwd);
@@ -205,7 +216,10 @@ const saveQuestion = () => {
   if (!imageUrl.value || imageUrl.value.includes('dicebear.com')) { alert('請務必上傳真實的「主要圖片」！'); return; }
   if (questionMode.value === 'reduce' && !prepositionSentence.value) { alert('請在漏斗中填寫簡化後的片語！'); return; }
 
+  // 1. 產生原句的字磚 (例如: who, is, [a blue uniform])
   const relCorrect = generateTiles(relativeSentence.value || '');
+
+  // 2. 處理迷思干擾磚
   let distractors = distractorsInput.value.split(/[,，\s]+/).filter(Boolean);
   if (distractors.length === 0 && questionType.value !== 'chunk') {
     const correctWords = relCorrect.map(w => w.replace(/[\[\]]/g, '').toLowerCase());
@@ -214,27 +228,12 @@ const saveQuestion = () => {
     distractors = [...new Set(distractors)].filter(d => !correctWords.includes(d.toLowerCase()));
   }
 
+  // 3. 合併字磚池 (原句字磚 + 干擾磚)，這就是學生一開始會看到的字磚
   let finalTiles = [...relCorrect, ...distractors];
+  finalTiles = [...new Set(finalTiles)]; // 去重
+  finalTiles.sort(() => Math.random() - 0.5); // 打亂
 
-  if (questionMode.value === 'reduce') {
-    const originalChunkMatch = relativeSentence.value.match(/\[([^\]]+)\]/);
-    const originalChunk = originalChunkMatch ? originalChunkMatch[1] : '';
-    const newChunk = prepositionSentence.value.replace(/[\[\]]/g, '').trim();
-
-    if (originalChunk && newChunk && originalChunk !== newChunk) {
-      const newChunkWithBrackets = `[${newChunk}]`;
-
-      const idx = relCorrect.findIndex(t => t === `[${originalChunk}]`);
-      if (idx !== -1) relCorrect[idx] = newChunkWithBrackets;
-
-      const tileIdx = finalTiles.findIndex(t => t === `[${originalChunk}]`);
-      if (tileIdx !== -1) finalTiles[tileIdx] = newChunkWithBrackets;
-    }
-  }
-
-  finalTiles = [...new Set(finalTiles)];
-  finalTiles.sort(() => Math.random() - 0.5);
-
+  // 4. 產生簡化句的字磚 (例如: [in a blue uniform])
   const prepTiles = generateTiles(prepositionSentence.value || '');
   const prepCorrect = [...prepTiles];
   prepTiles.sort(() => Math.random() - 0.5);
@@ -250,7 +249,9 @@ const saveQuestion = () => {
     isTimed: isTimedForm.value,
     timeLimit: isTimedForm.value ? timeLimitForm.value : undefined,
     grammarFeature: {
+      // 👈 關鍵：relative 的 tiles 保留原句+干擾磚，correctAnswer 保留原句
       relative: { label: relativeSentence.value || '', tiles: finalTiles, correctAnswer: relCorrect, distractors },
+      // 👈 關鍵：preposition 的 tiles 和 correctAnswer 都是簡化後的答案
       preposition: { label: prepositionSentence.value || '', tiles: prepTiles, correctAnswer: prepCorrect }
     },
     explanation: { title: explanationTitle.value, desc: explanationDesc.value },
@@ -309,6 +310,8 @@ const saveQuestion = () => {
     };
   }
 
+  console.log('👩‍🏫 老師儲存題目，產生的資料:', JSON.parse(JSON.stringify(newQuestion)));
+
   if (isEditing.value) {
     const index = localQuestions.value.findIndex(q => q.id === editingId.value);
     if (index !== -1) localQuestions.value[index] = newQuestion;
@@ -339,36 +342,45 @@ const saveAllAndClose = () => {
   <Teleport to="body">
     <div class="admin-modal">
       <div class="admin-layout">
+        <!-- 左側邊欄 -->
         <div class="sidebar">
+          <!-- 1. 固定頭部 -->
           <div class="sidebar-header">
             <h2>📚 課前備課中心</h2>
             <p>點擊題目編輯，或點擊「發送」讓全班跳轉。</p>
           </div>
 
-          <!--  新增：上課模式與人數設定 -->
+          <!-- 2. 可折疊的班級控制 -->
           <div class="class-mode-panel">
-            <div class="mode-toggle">
-              <label>
-                <input type="checkbox" v-model="isClassModeToggle" @change="handleModeChange" />
-                🎓 上課模式 (鎖定學生進度)
-              </label>
+            <div class="panel-header" @click="isClassPanelExpanded = !isClassPanelExpanded">
+              <h3>⚙️ 班級控制</h3>
+              <span class="toggle-icon">{{ isClassPanelExpanded ? '▲' : '▼' }}</span>
             </div>
-            <div class="target-count">
-              <label>目標人數：</label>
-              <input type="number" v-model.number="targetCountInput" @change="handleModeChange" />
+
+            <div v-show="isClassPanelExpanded" class="panel-content">
+              <div class="mode-toggle">
+                <label>
+                  <input type="checkbox" v-model="isClassModeToggle" @change="handleModeChange" />
+                  🎓 上課模式 (鎖定學生進度)
+                </label>
+              </div>
+              <div class="target-count">
+                <label>目標人數：</label>
+                <input type="number" v-model.number="targetCountInput" @change="handleModeChange" />
+              </div>
+              <button class="btn-reset-progress" @click="sendResetProgress">
+                🔄 重置全班作答進度
+              </button>
             </div>
-            <!-- 新增：重置進度按鈕 -->
-            <button class="btn-reset-progress" @click="sendResetProgress">
-              🔄 重置全班作答進度
-            </button>
           </div>
 
-          <div class="sidebar-section" style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
+          <!-- 3. 可折疊的列表區塊 -->
+          <div class="sidebar-section">
             <div class="section-header" @click="isQuestionsExpanded = !isQuestionsExpanded">
               <h3>📝 題目列表</h3>
               <span class="toggle-icon">{{ isQuestionsExpanded ? '▲' : '▼' }}</span>
             </div>
-            <div v-show="isQuestionsExpanded" style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
+            <div class="list-wrapper" v-show="isQuestionsExpanded">
               <div class="question-list">
                 <VueDraggable v-model="localQuestions" :animation="150" ghostClass="ghost" handle=".drag-handle"
                   class="question-list-inner">
@@ -378,8 +390,12 @@ const saveAllAndClose = () => {
                     <div class="q-index">
                       <div class="drag-handle" title="按住拖曳排序">⋮⋮</div>
                       第 {{ index + 1 }} 關
-                      <span class="q-type-tag" :class="q.type">{{ q.type === 'contrast' ? '對比題' : q.type === 'chunk' ?
-                        '片語題' : '標準題' }}</span>
+                      <span class="q-type-tag" :class="q.type">
+                        {{ q.type === 'contrast' ? '對比題' : q.type === 'chunk' ? '片語題' : '標準題' }}
+                      </span>
+                      <span v-if="q.type === 'standard'" class="q-mode-tag" :class="q.mode || 'build'">
+                        {{ (q.mode || 'build') === 'reduce' ? 'Reduce' : 'Build' }}
+                      </span>
                       <span v-if="q.isTimed" class="q-time-tag">🔴 {{ q.timeLimit || 60 }}s</span>
                       <span v-else class="q-free-tag">🟢 自由</span>
                     </div>
@@ -398,11 +414,14 @@ const saveAllAndClose = () => {
               </div>
             </div>
           </div>
+
+          <!-- 4. 固定底部按鈕 -->
           <div class="sidebar-footer">
             <button class="btn-close" @click="saveAllAndClose">✅ 完成備課，開始上課</button>
           </div>
         </div>
 
+        <!-- 右側編輯器 -->
         <div class="editor">
           <div class="editor-header">
             <h3>{{ isEditing ? '✏️ 編輯題目' : '🆕 新增題目' }}</h3>
@@ -414,7 +433,7 @@ const saveAllAndClose = () => {
           </div>
 
           <div class="editor-body">
-            <!-- 題目節奏設定 -->
+            <!-- 中間表單內容保持不變 -->
             <div class="form-group" v-if="questionType !== 'chunk'">
               <label>題目節奏</label>
               <div class="segmented-control">
@@ -428,21 +447,20 @@ const saveAllAndClose = () => {
               <input type="number" v-model.number="timeLimitForm" placeholder="60" min="10" step="10" />
             </div>
 
-            <!-- 教學流程 -->
             <div class="form-group" v-if="questionType !== 'chunk'">
               <label>本題教學流程</label>
               <div class="stage-checkboxes">
                 <label v-if="questionType === 'standard'"><input type="checkbox" value="input" v-model="enabledStages">
                   聽力輸入</label>
-                <label v-if="questionType === 'standard'"><input type="checkbox" value="macro" v-model="enabledStages">
-                  巨觀拖拉</label>
+                <label v-if="questionType === 'standard' && questionMode !== 'reduce'">
+                  <input type="checkbox" value="macro" v-model="enabledStages"> 巨觀拖拉
+                </label>
                 <label><input type="checkbox" value="micro" v-model="enabledStages"> 字磚重組</label>
                 <label><input type="checkbox" value="pronunciation" v-model="enabledStages"> 語音練習</label>
                 <label><input type="checkbox" value="noticing" v-model="enabledStages"> 意識提升</label>
               </div>
             </div>
 
-            <!-- 題目模式 -->
             <div class="form-group" v-if="questionType === 'standard'">
               <label>題目模式</label>
               <div class="type-switcher">
@@ -453,7 +471,6 @@ const saveAllAndClose = () => {
               </div>
             </div>
 
-            <!-- TTS 速度 -->
             <div class="form-group">
               <label>TTS 語音速度</label>
               <div class="type-switcher">
@@ -463,7 +480,6 @@ const saveAllAndClose = () => {
               </div>
             </div>
 
-            <!-- 片語題專屬欄位 -->
             <template v-if="questionType === 'chunk'">
               <div class="form-group">
                 <label>片語內容 (用 [ ] 包住要測驗的片語)</label>
@@ -480,10 +496,9 @@ const saveAllAndClose = () => {
               </div>
             </template>
 
-            <!-- 圖片上傳區 -->
             <div class="form-group">
               <label>{{ questionType === 'contrast' ? '名詞圖片 (拼圖右側)' : questionType === 'chunk' ? '片語情境圖片' : '正確角色圖片'
-                }}</label>
+              }}</label>
               <div class="upload-area" :class="{ 'active-upload': activeUploadTarget === 'noun' }"
                 @click="triggerUpload('noun')">
                 <img v-if="imageUrl" :src="imageUrl" class="preview-img" />
@@ -516,7 +531,6 @@ const saveAllAndClose = () => {
               </div>
             </template>
 
-            <!-- 目標名詞與標籤 -->
             <div class="form-row">
               <div class="form-group">
                 <label>目標名詞</label>
@@ -528,7 +542,6 @@ const saveAllAndClose = () => {
               </div>
             </div>
 
-            <!-- 先行詞單複數 -->
             <div class="form-group" v-if="questionType !== 'chunk'">
               <label>先行詞單複數 (影響動詞一致性判斷)</label>
               <div class="type-switcher">
@@ -539,7 +552,6 @@ const saveAllAndClose = () => {
               </div>
             </div>
 
-            <!-- 句型 A (漏斗輸入區) -->
             <div class="form-group" v-if="questionType !== 'chunk'">
               <label style="display: flex; justify-content: space-between;">
                 <span>句型 A：關係子句 (漏斗入口)</span>
@@ -552,7 +564,6 @@ const saveAllAndClose = () => {
                 @focus="activeUploadTarget = null" />
             </div>
 
-            <!-- 漏斗視覺化預覽 (只在 Reduce 模式顯示) -->
             <div v-if="questionType === 'standard' && questionMode === 'reduce'" class="funnel-preview">
               <div class="funnel-title">🔍 系統自動拆解預覽 (可手動修改保留內容)</div>
 
@@ -578,7 +589,6 @@ const saveAllAndClose = () => {
               <input v-model="prepositionSentence" type="text" />
             </div>
 
-            <!-- 干擾磚選擇器 -->
             <div class="form-group" v-if="questionType === 'standard'">
               <label>迷思干擾磚 (點擊下方標籤快速加入)</label>
 
@@ -603,7 +613,6 @@ const saveAllAndClose = () => {
                 @focus="activeUploadTarget = null" />
             </div>
 
-            <!-- 克漏字 -->
             <div class="form-group" v-if="questionType === 'standard'">
               <label>克漏字上下文 (選填，若填寫將用於 TTS 發音句子)</label>
               <div style="display: flex; gap: 8px; align-items: center;">
@@ -615,7 +624,6 @@ const saveAllAndClose = () => {
               </div>
             </div>
 
-            <!-- 圖片下方文字 -->
             <div class="form-row" v-if="questionType === 'standard'">
               <div class="form-group">
                 <label>正確圖下方文字 (選填)</label>
@@ -629,7 +637,6 @@ const saveAllAndClose = () => {
               </div>
             </div>
 
-            <!-- 對比題專屬欄位 -->
             <template v-if="questionType === 'contrast'">
               <div class="form-group">
                 <label>中文句子</label>
@@ -674,7 +681,9 @@ const saveAllAndClose = () => {
 </template>
 
 <style scoped>
-/* 樣式保持不變，加上 class-mode-panel 樣式 */
+/* =========================================
+   主體佈局與滾動修復 (RWD)
+   ========================================= */
 .admin-modal {
   position: fixed;
   top: 0;
@@ -715,6 +724,9 @@ const saveAllAndClose = () => {
   }
 }
 
+/* =========================================
+   左側邊欄：嚴格控制 Flexbox 高度
+   ========================================= */
 .sidebar {
   width: 320px;
   background: #f7f9fc;
@@ -724,10 +736,15 @@ const saveAllAndClose = () => {
   height: 100%;
 }
 
+/* 固定區塊 */
+.sidebar-header,
+.sidebar-footer {
+  flex-shrink: 0;
+}
+
 .sidebar-header {
   padding: 24px;
   border-bottom: 2px solid #e5e5e5;
-  flex-shrink: 0;
 }
 
 .sidebar-header h2 {
@@ -743,11 +760,39 @@ const saveAllAndClose = () => {
   line-height: 1.5;
 }
 
-/*  新增：班級模式面板 */
+/* 班級控制面板 (可折疊) */
 .class-mode-panel {
-  padding: 16px 24px;
   background: #fff8e1;
   border-bottom: 2px solid #ffe082;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.panel-header {
+  padding: 16px 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.panel-header:hover {
+  background: #ffecb3;
+}
+
+.panel-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: #b45309;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel-content {
+  padding: 0 24px 16px 24px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -782,10 +827,31 @@ const saveAllAndClose = () => {
   outline: none;
 }
 
+.btn-reset-progress {
+  margin-top: 4px;
+  background: #ff4b4b;
+  color: white;
+  border: none;
+  border-bottom: 3px solid #cc0000;
+  padding: 8px;
+  border-radius: 8px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.1s;
+  width: 100%;
+}
+
+.btn-reset-progress:active {
+  border-bottom-width: 0;
+  transform: translateY(3px);
+}
+
+/* 中間可伸縮區塊 */
 .sidebar-section {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  border-bottom: 2px solid #e5e5e5;
+  min-height: 0;
 }
 
 .section-header {
@@ -797,6 +863,7 @@ const saveAllAndClose = () => {
   background: #f0f4f8;
   transition: background 0.2s;
   user-select: none;
+  flex-shrink: 0;
 }
 
 .section-header:hover {
@@ -817,6 +884,13 @@ const saveAllAndClose = () => {
   color: #777;
 }
 
+.list-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .question-list {
   flex: 1;
   overflow-y: auto;
@@ -833,22 +907,27 @@ const saveAllAndClose = () => {
 }
 
 .sidebar-footer {
-  padding: 24px;
+  padding: 16px 24px;
   background: #ffffff;
   border-top: 2px solid #e5e5e5;
-  flex-shrink: 0;
+  z-index: 10;
 }
 
+
+/* =========================================
+   右側編輯器
+   ========================================= */
 .editor {
   flex: 1;
   display: flex;
   flex-direction: column;
   background: #ffffff;
   min-width: 0;
+  min-height: 0;
 }
 
 .editor-header {
-  padding: 24px 32px;
+  padding: 20px 32px;
   border-bottom: 2px solid #f0f0f0;
   flex-shrink: 0;
 }
@@ -886,7 +965,7 @@ const saveAllAndClose = () => {
 .editor-body {
   flex: 1;
   overflow-y: auto;
-  padding: 32px;
+  padding: 24px 32px;
 }
 
 .form-group {
@@ -913,7 +992,7 @@ const saveAllAndClose = () => {
 
 .form-group input[type="text"],
 .form-group input[type="number"] {
-  padding: 16px;
+  padding: 14px;
   border: 2px solid #e5e5e5;
   border-radius: 12px;
   font-size: 1.05rem;
@@ -934,7 +1013,7 @@ const saveAllAndClose = () => {
 .upload-area {
   border: 2px dashed #ccc;
   border-radius: 16px;
-  height: 180px;
+  height: 160px;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -975,7 +1054,7 @@ const saveAllAndClose = () => {
 }
 
 .editor-footer {
-  padding: 24px 32px;
+  padding: 16px 32px;
   border-top: 2px solid #f0f0f0;
   display: flex;
   justify-content: flex-end;
@@ -984,6 +1063,9 @@ const saveAllAndClose = () => {
   flex-shrink: 0;
 }
 
+/* =========================================
+   其他組件樣式保持不變
+   ========================================= */
 .stage-checkboxes {
   display: flex;
   flex-wrap: wrap;
@@ -1082,6 +1164,25 @@ const saveAllAndClose = () => {
 
 .q-type-tag.chunk {
   background: #9c27b0;
+}
+
+.q-mode-tag {
+  font-size: 0.65rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: bold;
+}
+
+.q-mode-tag.build {
+  background: #e6f7ff;
+  color: #1cb0f6;
+  border: 1px solid #1cb0f6;
+}
+
+.q-mode-tag.reduce {
+  background: #f3e8ff;
+  color: #9333ea;
+  border: 1px solid #9333ea;
 }
 
 .q-time-tag {
@@ -1241,11 +1342,6 @@ const saveAllAndClose = () => {
   border: 2px dashed #1cb0f6;
 }
 
-.text-success {
-  color: #58cc02;
-  font-weight: bold;
-}
-
 .segmented-control {
   display: flex;
   background: #f0f0f0;
@@ -1386,23 +1482,5 @@ const saveAllAndClose = () => {
     opacity: 1;
     transform: translateY(0);
   }
-}
-
-.btn-reset-progress {
-  margin-top: 8px;
-  background: #ff4b4b;
-  color: white;
-  border: none;
-  border-bottom: 3px solid #cc0000;
-  padding: 8px;
-  border-radius: 8px;
-  font-weight: bold;
-  cursor: pointer;
-  transition: all 0.1s;
-  width: 100%;
-}
-.btn-reset-progress:active {
-  border-bottom-width: 0;
-  transform: translateY(3px);
 }
 </style>

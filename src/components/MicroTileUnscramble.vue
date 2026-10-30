@@ -3,7 +3,7 @@ import { ref, watch, computed } from 'vue';
 import { validatePostModifier } from '../rules/grammarRules';
 import type { Antecedent, DiagnosticSignal } from '../rules/types';
 import { useSound } from '../utils/useSound';
-import { useTTS } from '../utils/useSpeech'; // 👈 引入 TTS
+import { useTTS } from '../utils/useSpeech';
 
 const { playError, playSuccess } = useSound();
 const { speak } = useTTS();
@@ -22,71 +22,59 @@ const emit = defineEmits<{
   (e: 'misconception', code: string): void;
 }>();
 
-// 初始化字磚狀態
 const answerArea = ref<{ id: number; text: string }[]>([]);
-const trashArea = ref<{ id: number; text: string }[]>([]); // 👈 新增垃圾桶
+const trashArea = ref<{ id: number; text: string }[]>([]);
 const signals = ref<DiagnosticSignal[]>([]);
 const isSuccess = ref(false);
 const isWrong = ref(false);
 
-// 根據模式初始化
 const initTiles = () => {
+  console.log('🎮 MicroTileUnscramble 收到的 Props:', {
+    mode: props.mode,
+    initialTiles: props.initialTiles,
+    correctAnswer: props.correctAnswer
+  });
+
   if (props.mode === 'reduce') {
-    // Reduce 模式：全部字磚（原句）都在作答區，順序是正確的
     answerArea.value = props.initialTiles.map((text, index) => ({ id: index, text }));
     trashArea.value = [];
-  } else {
-    // Build 模式：初始在作答區的只有空陣列，全部在 wordBank
-    // 但在你的舊架構中，是從 wordBank 點進 answerArea，這裡我們保留原有的 wordBank 概念
-    // 為了相容，我們這裡把 initialTiles 當作 wordBank 的來源
   }
 };
 
 initTiles();
 
-// 用於 Build 模式的 wordBank (如果 props.mode === 'build')
+// Build 模式：初始字磚庫
 const wordBank = ref<{ id: number; text: string }[]>(
   props.mode === 'build' ? props.initialTiles.map((text, index) => ({ id: index, text })) : []
 );
 
-// 點擊作答區的字磚 (Reduce 模式下：丟進垃圾桶)
 const discardTile = (tile: { id: number; text: string }) => {
   if (isSuccess.value || props.mode !== 'reduce') return;
-
-  // 從作答區移除
   const index = answerArea.value.findIndex(t => t.id === tile.id);
   if (index !== -1) {
     const [removed] = answerArea.value.splice(index, 1);
-    trashArea.value.push(removed); // 丟進垃圾桶
-    isWrong.value = false;
-    signals.value = [];
-    checkAnswer(); // 每次丟棄後自動檢查
-  }
-};
-
-// 從垃圾桶撿回字磚
-const restoreTile = (tile: { id: number; text: string }) => {
-  if (isSuccess.value) return;
-
-  const index = trashArea.value.findIndex(t => t.id === tile.id);
-  if (index !== -1) {
-    const [restored] = trashArea.value.splice(index, 1);
-
-    // 根據原本的 id 順序插回正確位置
-    answerArea.value.push(restored);
-    answerArea.value.sort((a, b) => a.id - b.id);
-
+    trashArea.value.push(removed);
     isWrong.value = false;
     signals.value = [];
     checkAnswer();
   }
 };
 
-// 檢查答案
+const restoreTile = (tile: { id: number; text: string }) => {
+  if (isSuccess.value) return;
+  const index = trashArea.value.findIndex(t => t.id === tile.id);
+  if (index !== -1) {
+    const [restored] = trashArea.value.splice(index, 1);
+    answerArea.value.push(restored);
+    answerArea.value.sort((a, b) => a.id - b.id); // 保持原本順序
+    isWrong.value = false;
+    signals.value = [];
+    checkAnswer();
+  }
+};
+
 const checkAnswer = () => {
   const tileTexts = answerArea.value.map(t => t.text);
-
-  // 1. 執行語法檢查
   signals.value = validatePostModifier(tileTexts, props.antecedent, { mode: props.mode });
 
   if (signals.value.length > 0) {
@@ -95,20 +83,16 @@ const checkAnswer = () => {
     return;
   }
 
-  // 2. 檢查字序是否正確 (過濾中括號以進行比對)
   const cleanCurrent = tileTexts.map(t => t.replace(/[\[\]]/g, '')).join(' ');
   const cleanTarget = props.correctAnswer.map(t => t.replace(/[\[\]]/g, '')).join(' ');
 
   if (cleanCurrent === cleanTarget) {
     playSuccess();
     isSuccess.value = true;
-
-    // 朗讀成功句子
     speak(cleanCurrent, { rate: props.speechRate ?? 0.8 });
-
     setTimeout(() => emit('success'), 1500);
   } else {
-    // 如果長度正確但順序不對
+    // 長度對了但順序不對 (通常發生在 Build 模式)
     if (answerArea.value.length === props.correctAnswer.length) {
       playError();
       emit('misconception', 'WRONG_ORDER');
@@ -118,7 +102,6 @@ const checkAnswer = () => {
   }
 };
 
-// Build 模式的點擊邏輯 (保留原有)
 const selectTile = (tile: { id: number; text: string }) => {
   if (isSuccess.value) return;
   const index = wordBank.value.findIndex(t => t.id === tile.id);
@@ -152,23 +135,59 @@ const isError = (index: number) => signals.value.some(s => s.index === index);
     <!-- 克漏字上下文 -->
     <div class="cloze-context" v-if="props.contextCloze">
       <span class="cloze-text">{{ props.contextCloze.prefix }}</span>
-      <span class="cloze-blank">
-        {{answerArea.length > 0 ? answerArea.map(t => t.text.replace(/[\[\]]/g, '')).join(' ') : '________'}}
-      </span>
+
+      <div class="cloze-blanks-container">
+        <!-- 👈 Build 模式：根據正確答案的長度，固定渲染格子數量 -->
+        <template v-if="props.mode === 'build'">
+          <span v-for="(_, index) in props.correctAnswer.length" :key="index" class="cloze-blank-slot"
+            :class="{ 'has-text': answerArea[index] }">
+            {{ answerArea[index] ? answerArea[index].text.replace(/[\[\]]/g, '') : '' }}
+          </span>
+        </template>
+
+        <!-- 👈 Reduce 模式：動態顯示目前的字磚（讓學生看到完整句子以進行刪減） -->
+        <template v-else>
+          <span v-for="(tile, index) in answerArea" :key="index" class="cloze-blank-slot has-text">
+            {{ tile.text.replace(/[\[\]]/g, '') }}
+          </span>
+          <span v-if="answerArea.length === 0" class="cloze-blank-slot placeholder"
+            style="min-width: 100px; border-bottom: 3px dashed #1cb0f6; height: 38px;"></span>
+        </template>
+      </div>
+
       <span class="cloze-text">{{ props.contextCloze.suffix }}</span>
     </div>
 
     <!-- 作答區 -->
     <div data-test="answer-area" class="answer-area" :class="{ 'success-bg': isSuccess, 'shake': isWrong }">
-      <div v-for="(tile, index) in answerArea" :key="tile.id" data-test="tile" class="tile" :class="{
-        'tile-error': isError(index),
-        'tile-success': isSuccess,
-        'tile-wrong': isWrong,
-        'tile-chunk': tile.text.startsWith('['),
-        'is-reduce-mode': props.mode === 'reduce'
-      }" @click="props.mode === 'reduce' ? discardTile(tile) : unselectTile(tile)">
-        {{ tile.text.replace(/[\[\]]/g, '') }}
-      </div>
+
+      <!-- 👈 Build 模式：渲染固定數量的空位 -->
+      <template v-if="props.mode === 'build'">
+        <div v-for="(slot, index) in props.correctAnswer.length" :key="index" class="answer-slot">
+          <div v-if="answerArea[index]" data-test="tile" class="tile" :class="{
+            'tile-error': isError(index),
+            'tile-success': isSuccess,
+            'tile-wrong': isWrong,
+            'tile-chunk': answerArea[index].text.startsWith('[')
+          }" @click="unselectTile(answerArea[index])">
+            {{ answerArea[index].text.replace(/[\[\]]/g, '') }}
+          </div>
+          <div v-else class="empty-slot"></div>
+        </div>
+      </template>
+
+      <!-- 👈 Reduce 模式：直接渲染所有字磚，讓學生點擊丟棄 -->
+      <template v-else>
+        <div v-for="(tile, index) in answerArea" :key="tile.id" data-test="tile" class="tile is-reduce-mode" :class="{
+          'tile-error': isError(index),
+          'tile-success': isSuccess,
+          'tile-wrong': isWrong,
+          'tile-chunk': tile.text.startsWith('[')
+        }" @click="discardTile(tile)">
+          {{ tile.text.replace(/[\[\]]/g, '') }}
+        </div>
+      </template>
+
     </div>
 
     <!-- 錯誤提示 -->
@@ -183,7 +202,7 @@ const isError = (index: number) => signals.value.some(s => s.index === index);
       <p>順序好像不太對喔，點擊字磚退回重排看看！</p>
     </div>
 
-    <!-- 👈 新增：垃圾桶區域 (只在 Reduce 模式顯示) -->
+    <!-- 垃圾桶區域 (只在 Reduce 模式顯示) -->
     <div v-if="props.mode === 'reduce'" class="trash-zone-wrapper">
       <div class="trash-label">🗑️ 丟棄不需要的詞</div>
       <div class="trash-area">
@@ -207,7 +226,6 @@ const isError = (index: number) => signals.value.some(s => s.index === index);
 </template>
 
 <style scoped>
-/* 原有樣式保持不變 */
 .micro-tile-game {
   display: flex;
   flex-direction: column;
@@ -230,6 +248,7 @@ const isError = (index: number) => signals.value.some(s => s.index === index);
 .answer-area {
   border-bottom: 4px dashed #e5e5e5;
   background: #fdfdfd;
+  align-items: center;
 }
 
 .answer-area.success-bg {
@@ -240,6 +259,26 @@ const isError = (index: number) => signals.value.some(s => s.index === index);
 .word-bank {
   border: 2px solid #e5e5e5;
   background: #ffffff;
+}
+
+/* 作答區的空位 (Build 模式用) */
+.answer-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 60px;
+  min-height: 50px;
+}
+
+.empty-slot {
+  width: 100%;
+  height: 100%;
+  min-width: 60px;
+  min-height: 50px;
+  border-bottom: 3px dashed #ccc;
+  border-radius: 8px;
+  background: #f4f4f4;
+  transition: all 0.2s;
 }
 
 .tile {
@@ -254,6 +293,9 @@ const isError = (index: number) => signals.value.some(s => s.index === index);
   font-weight: 600;
   color: #4b4b4b;
   transition: all 0.1s;
+  height: 100%;
+  display: flex;
+  align-items: center;
 }
 
 .tile:hover {
@@ -328,8 +370,15 @@ const isError = (index: number) => signals.value.some(s => s.index === index);
   animation: fadeIn 0.3s ease-out;
 }
 
+/* =========================================
+   克漏字區域樣式
+   ========================================= */
 .cloze-context {
-  text-align: center;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
   font-size: 1.4rem;
   font-weight: bold;
   color: #333;
@@ -341,16 +390,34 @@ const isError = (index: number) => signals.value.some(s => s.index === index);
   color: #555;
 }
 
-.cloze-blank {
-  color: #1cb0f6;
-  background: #e6f7ff;
-  padding: 4px 12px;
-  border-radius: 8px;
-  border-bottom: 2px dashed #1cb0f6;
-  margin: 0 8px;
+.cloze-blanks-container {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
 }
 
-/* 👈 新增：垃圾桶樣式 */
+.cloze-blank-slot {
+  min-width: 50px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #e6f7ff;
+  color: #1cb0f6;
+  border-radius: 8px;
+  border-bottom: 3px dashed #1cb0f6;
+  padding: 0 8px;
+  transition: all 0.2s;
+  box-sizing: border-box;
+}
+
+.cloze-blank-slot.has-text {
+  background: #d0f0ff;
+  border-bottom-style: solid;
+}
+
+/* 垃圾桶樣式 */
 .trash-zone-wrapper {
   margin-top: 16px;
   border-top: 2px dashed #eee;
@@ -396,7 +463,6 @@ const isError = (index: number) => signals.value.some(s => s.index === index);
   text-decoration: none;
 }
 
-/* 讓 reduce 模式點擊字磚有「被剝離」的視覺感 */
 .is-reduce-mode:hover {
   background-color: #ffe6e6;
   border-color: #ff4b4b;

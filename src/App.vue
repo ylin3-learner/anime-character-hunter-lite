@@ -50,9 +50,6 @@ const presenceCompletedCount = ref(0);
 const targetCount = ref(0);
 const isClassMode = ref(false);
 
-// ==========================================
-// 1. 防切屏與計時器邏輯
-// ==========================================
 const showFocusWarning = ref(false);
 
 const handleDistracted = () => {
@@ -67,14 +64,10 @@ const { timeLeft, isTimeUp, startTimer, addTime, clearTimer } = useQuizTimer(() 
   playError();
 });
 
-// ==========================================
-// 2. 初始化與 Realtime 連線
-// ==========================================
 const handleGlobalInteraction = () => {
   unlockAudioContext();
   unlockTTS();
-  document.removeEventListener('pointerdown', handleGlobalInteraction);
-  document.removeEventListener('touchstart', handleGlobalInteraction);
+  document.removeEventListener('pointerup', handleGlobalInteraction);
 };
 
 onMounted(async () => {
@@ -129,10 +122,9 @@ onMounted(async () => {
       presenceCompletedCount.value = payload.completedCount;
     }
 
-    // 新增：收到老師的重置指令
     if (event === 'RESET_PROGRESS') {
       console.log('📡 收到重置指令，進度歸零');
-      trackAnswering(); // 把自己狀態改回作答中
+      trackAnswering();
     }
   }, studentId);
 });
@@ -150,11 +142,22 @@ const fixAntecedentNumbers = () => {
   });
 };
 
-// ==========================================
-// 3. 核心狀態與流程控制
-// ==========================================
 const currentQuestion = computed(() => questionBank.value[currentIndex.value] || (defaultQuestions[0] as unknown as QuestionData));
 const getEnabledStages = computed(() => currentQuestion.value.enabledStages || ['input', 'macro', 'micro', 'pronunciation', 'noticing']);
+
+const instructionText = computed(() => {
+  if (currentStage.value === 'success' || currentStage.value === 'noticing') return '';
+  if (currentQuestion.value.type === 'contrast') return '請將兩側的圖片配合英文，分別拖曳到中間的空格中，達到正確地語序。';
+  if (currentStage.value === 'preview') return '請先觀察圖片並聽發音，選出正確的片語意思。';
+  if (currentStage.value === 'input') return '請點擊喇叭聽發音，並選出符合描述的角色圖片。';
+  if (currentStage.value === 'macro') return '請將角色圖塊拖曳到名詞的「後方」。';
+  if (currentStage.value === 'micro') {
+    return currentQuestion.value.mode === 'reduce'
+      ? '請點擊上方多餘的字磚，將它們丟進垃圾桶，只保留正確的簡化片語。'
+      : '請點擊下方的字磚，將它們排列成正確的英文句子。';
+  }
+  return '';
+});
 
 watch(
   [() => currentQuestion.value?.id, () => currentQuestion.value?.timeLimit, () => currentQuestion.value?.isTimed, currentStage],
@@ -178,6 +181,10 @@ const checkAndSetInitialStage = () => {
   if (currentQuestion.value.type === 'chunk') { currentStage.value = 'preview'; return; }
   if (currentQuestion.value.previewData && getEnabledStages.value.includes('input')) currentStage.value = 'preview';
   else if (getEnabledStages.value.includes('input') && currentQuestion.value.inputData) currentStage.value = 'input';
+
+  // 👈 關鍵修改：如果是 Reduce 題，直接跳過 Macro 進 Micro
+  else if (currentQuestion.value.mode === 'reduce' && getEnabledStages.value.includes('micro')) currentStage.value = 'micro';
+
   else if (getEnabledStages.value.includes('macro')) currentStage.value = 'macro';
   else if (getEnabledStages.value.includes('micro')) currentStage.value = 'micro';
   else currentStage.value = 'success';
@@ -197,6 +204,12 @@ const handleMisconception = (code: string) => {
 };
 
 const handleInputSuccess = () => {
+  // 👈 關鍵修改：如果是 Reduce 題，從 Input 直接跳 Micro
+  if (currentQuestion.value.mode === 'reduce' && getEnabledStages.value.includes('micro')) {
+    currentStage.value = 'micro';
+    return;
+  }
+
   if (getEnabledStages.value.includes('macro')) currentStage.value = 'macro';
   else if (getEnabledStages.value.includes('micro')) currentStage.value = 'micro';
   else currentStage.value = 'success';
@@ -228,12 +241,12 @@ const handleNoticingComplete = () => {
 
 const restartGame = () => { currentIndex.value = 0; sessionLog.value = []; completedCount.value = 0; showSummary.value = false; checkAndSetInitialStage(); };
 
-// ==========================================
-// 4. 老師端指令處理
-// ==========================================
 const updateQuestionBank = async (updatedQuestions: QuestionData[]) => {
   const currentIdx = currentIndex.value;
   questionBank.value = updatedQuestions;
+
+  console.log('📥 App.vue 收到本地同步題庫:', JSON.parse(JSON.stringify(updatedQuestions)));
+
   fixAntecedentNumbers();
   showAdmin.value = false;
 
@@ -303,6 +316,7 @@ const logoutAdmin = () => {
 
 <template>
   <div class="app-container">
+    <!-- Template 保持不變，請直接沿用上一則回覆的 Template -->
     <Transition name="fade">
       <div v-if="showFocusWarning" class="focus-warning-overlay">
         <div class="warning-box">
@@ -328,12 +342,10 @@ const logoutAdmin = () => {
       </div>
     </Transition>
 
-    <!-- 優化後的 Header 結構 -->
     <header>
       <h1>🕵️ Anime Character Hunter</h1>
 
       <div class="header-controls">
-        <!-- 狀態標籤區 -->
         <div class="status-group">
           <div v-if="targetCount > 0" class="progress-tracker"
             :class="{ 'all-done': presenceCompletedCount >= targetCount }">
@@ -342,12 +354,10 @@ const logoutAdmin = () => {
           <div class="progress-bar">第 {{ currentIndex + 1 }} / {{ questionBank.length }} 關</div>
         </div>
 
-        <!-- 操作按鈕區 -->
         <div class="action-group">
           <button class="btn btn-finish" @click="showSummary = true">
             <span class="btn-icon">🏁</span> <span class="btn-text">結束練習</span>
           </button>
-
           <template v-if="isAdminAuthenticated">
             <button class="btn btn-admin" @click="openAdmin">
               <span class="btn-icon">👩‍🏫</span> <span class="btn-text">教師備課中心</span>
@@ -356,13 +366,18 @@ const logoutAdmin = () => {
               <span class="btn-icon">🚪</span> <span class="btn-text">登出教師</span>
             </button>
           </template>
-
           <button class="btn btn-analytics" @click="openAnalytics">
             <span class="btn-icon">📊</span> <span class="btn-text">數據分析</span>
           </button>
         </div>
       </div>
     </header>
+
+    <Transition name="fade">
+      <div v-if="instructionText" class="instruction-banner">
+        💡 {{ instructionText }}
+      </div>
+    </Transition>
 
     <main class="game-card" :key="currentQuestion.id + currentMode">
       <div v-if="currentStage === 'noticing' && currentQuestion.noticingData" class="stage-content"
@@ -410,14 +425,12 @@ const logoutAdmin = () => {
       </div>
 
       <div v-else-if="currentStage === 'macro'" class="stage-content">
-        <h2 class="instruction">請將角色圖塊拖曳到名詞<strong>後方</strong>。</h2>
         <div class="target-noun"><span class="highlight">{{ currentQuestion.targetNoun }}</span></div>
         <MacroDragCanvas :targetNoun="currentQuestion.targetNoun" :grammarFeature="currentQuestion.grammarFeature"
-          :imageUrl="currentQuestion.imageUrl" @unpack="handleUnpack" />
+          :imageUrl="currentQuestion.imageUrl" :mode="currentQuestion.mode || 'build'" @unpack="handleUnpack" />
       </div>
 
       <div v-else-if="currentStage === 'micro'" class="stage-content">
-        <h2 class="instruction">圖塊已解鎖！請排列出正確的字序。</h2>
         <div class="target-noun"><span class="highlight">{{ currentQuestion.targetNoun }}</span></div>
         <MicroTileUnscramble
           :initialTiles="currentQuestion.mode === 'reduce' ? currentQuestion.grammarFeature.relative.tiles : currentQuestion.grammarFeature[currentMode].tiles"
@@ -454,9 +467,7 @@ const logoutAdmin = () => {
 </template>
 
 <style scoped>
-/* =========================================
-   全域變數與基礎設定
-   ========================================= */
+/* 保持原本樣式，請直接沿用上一則回覆的 Style */
 :root {
   --primary-color: #1cb0f6;
   --success-color: #58cc02;
@@ -480,12 +491,9 @@ const logoutAdmin = () => {
   box-sizing: border-box;
 }
 
-/* =========================================
-   Header 與按鈕佈局優化
-   ========================================= */
 header {
   text-align: center;
-  margin-bottom: 32px;
+  margin-bottom: 24px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -509,7 +517,6 @@ header h1 {
   width: 100%;
 }
 
-/* 狀態標籤組 */
 .status-group {
   display: flex;
   justify-content: center;
@@ -546,7 +553,6 @@ header h1 {
   color: var(--primary-color);
 }
 
-/* 操作按鈕組 */
 .action-group {
   display: flex;
   justify-content: center;
@@ -557,7 +563,6 @@ header h1 {
   max-width: 850px;
 }
 
-/* 通用按鈕樣式 (立體感 + 絕對不會消失的文字) */
 .btn {
   border: none;
   padding: 10px 20px;
@@ -570,23 +575,17 @@ header h1 {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  /* 圖標與文字間距 */
   white-space: nowrap;
   color: #ffffff !important;
-  /* 強制文字為白色，防止被其他樣式隱藏 */
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-  /* 讓文字邊緣更清晰 */
 }
 
-/* Hover 狀態：微微上浮 + 陰影加深 */
 .btn:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   filter: brightness(1.1);
-  /* 稍微提亮 */
 }
 
-/* Active 狀態：按壓感 */
 .btn:active {
   transform: translateY(2px) !important;
   box-shadow: 0 0px 0px transparent !important;
@@ -597,7 +596,6 @@ header h1 {
   line-height: 1;
 }
 
-/* 結束練習 (改用更醒目的橘紅色系) */
 .btn-finish {
   background: #ff6b6b;
   border-bottom: 4px solid #e05252;
@@ -607,13 +605,11 @@ header h1 {
   background: #ff5252;
 }
 
-/* 教師備課 */
 .btn-admin {
   background: #fbc02d;
   border-bottom: 4px solid #dca500;
 }
 
-/* 登出教師 (灰白色系，避免搶走主視覺) */
 .btn-logout {
   background: #9e9e9e;
   border-bottom: 4px solid #757575;
@@ -621,40 +617,27 @@ header h1 {
 
 .btn-logout .btn-icon {
   filter: grayscale(1) brightness(10);
-  /* 讓圖標保持白色 */
 }
 
-/* 數據分析 */
 .btn-analytics {
   background: #ab47bc;
   border-bottom: 4px solid #8e24aa;
 }
 
-/* 手機版響應式調整 */
-@media (max-width: 600px) {
-  header h1 {
-    font-size: 1.8rem;
-  }
-
-  .action-group {
-    gap: 8px;
-  }
-
-  .btn {
-    padding: 8px 16px;
-    font-size: 0.85rem;
-  }
-
-  .progress-tracker,
-  .progress-bar {
-    font-size: 0.85rem;
-    padding: 6px 16px;
-  }
+.instruction-banner {
+  background: #fff8e1;
+  color: #b45309;
+  text-align: center;
+  padding: 12px 20px;
+  border-radius: 12px;
+  font-weight: bold;
+  font-size: 1.05rem;
+  margin-bottom: 20px;
+  border: 2px dashed #fcd34d;
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.1);
+  animation: slideDown 0.3s ease-out;
 }
 
-/* =========================================
-   遊戲卡片主體
-   ========================================= */
 .game-card {
   background: white;
   border-radius: 24px;
@@ -674,13 +657,6 @@ header h1 {
   flex-direction: column;
   flex: 1;
   width: 100%;
-}
-
-.instruction {
-  text-align: center;
-  color: var(--text-muted);
-  font-size: 1.1rem;
-  margin: 0 0 24px 0;
 }
 
 .target-noun {
@@ -708,9 +684,6 @@ header h1 {
   z-index: -1;
 }
 
-/* =========================================
-   成功畫面
-   ========================================= */
 .success-screen {
   display: flex;
   flex-direction: column;
@@ -746,15 +719,10 @@ header h1 {
 }
 
 .btn-primary {
-  /* 1. 直接寫死亮綠色，不使用變數，確保背景色一定顯示 */
-  background-color: #58cc02 !important; 
-  color: #ffffff !important; /* 確保文字是白色 */
-  
-  /* 2. 加深文字陰影，讓白字在亮綠底上依然清晰可見 */
+  background-color: #58cc02 !important;
+  color: #ffffff !important;
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-  
   border: none;
-  /* 3. 底部立體邊框，顏色比背景更深，產生 3D 效果 */
   border-bottom: 5px solid #46a302;
   padding: 16px 48px;
   font-size: 1.2rem;
@@ -765,19 +733,15 @@ header h1 {
   margin-top: 20px;
   width: 100%;
   max-width: 300px;
-  
-  /* 4. 消除點擊時的藍色方塊 */
   -webkit-tap-highlight-color: transparent;
   user-select: none;
 }
 
-/* 按下去的動畫保持不變 */
 .btn-primary:active:not(:disabled) {
   border-bottom-width: 0;
   transform: translateY(5px);
 }
 
-/* 處理禁用狀態，避免等待老師時按鈕也綠綠的 */
 .btn-primary:disabled {
   background-color: #cccccc !important;
   border-bottom-color: #999999 !important;
@@ -791,9 +755,6 @@ header h1 {
   margin-bottom: 24px;
 }
 
-/* =========================================
-   遮罩層與彈窗 (計時器、警告、登入)
-   ========================================= */
 .auth-overlay,
 .timeout-overlay,
 .focus-warning-overlay {
@@ -935,7 +896,6 @@ header h1 {
   transform: translateY(4px);
 }
 
-/* 計時器 */
 .timer-bar {
   position: fixed;
   top: 20px;
@@ -974,7 +934,6 @@ header h1 {
   transform: scale(0.95);
 }
 
-/* 動畫 */
 @keyframes popIn {
   0% {
     transform: scale(0.9);
@@ -1001,6 +960,18 @@ header h1 {
   }
 }
 
+@keyframes slideDown {
+  from {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
 .fade-enter-active,
 .fade-leave-active {
   transition: opacity 0.3s;
@@ -1011,7 +982,6 @@ header h1 {
   opacity: 0;
 }
 
-/* 響應式調整 (手機版) */
 @media (max-width: 600px) {
   header h1 {
     font-size: 1.8rem;
@@ -1040,6 +1010,11 @@ header h1 {
     font-size: 1rem;
     padding: 6px 16px;
     top: 10px;
+  }
+
+  .instruction-banner {
+    font-size: 0.95rem;
+    padding: 10px 16px;
   }
 }
 </style>
