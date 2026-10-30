@@ -10,14 +10,11 @@ export function useClassroomSync() {
             channel = null;
         }
 
-        const channelName = `classroom_sync_${Date.now()}`;
+        // 使用固定的頻道名稱
+        const channelName = 'classroom_sync_main'; 
 
         channel = supabase.channel(channelName, {
-            config: {
-                presence: {
-                    key: studentId,
-                },
-            },
+            config: { presence: { key: studentId } },
         })
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'classroom_state' }, (payload) => {
                 const newState = payload.new;
@@ -28,6 +25,10 @@ export function useClassroomSync() {
                     targetCount: newState.target_count
                 });
             })
+            // 新增：接收老師的重置廣播
+            .on('broadcast', { event: 'RESET_PROGRESS' }, () => {
+                onReceive('RESET_PROGRESS', {});
+            })
             .on('presence', { event: 'sync' }, () => {
                 const presenceState = channel?.presenceState() || {};
                 const completedCount = Object.values(presenceState)
@@ -36,9 +37,9 @@ export function useClassroomSync() {
                 onReceive('PRESENCE_SYNC', { completedCount });
             })
             .subscribe(async (status) => {
+                console.log(`[Realtime] Channel status:`, status); 
                 if (status === 'SUBSCRIBED') {
                     await channel?.track({ status: 'answering' });
-                    // 連線成功時主動拉取一次最新狀態
                     const { data } = await supabase.from('classroom_state').select('*').eq('id', 'current_state').single();
                     if (data) {
                         onReceive('SYNC_STATE', {
@@ -53,14 +54,17 @@ export function useClassroomSync() {
     };
 
     const trackCompleted = async () => {
-        if (channel) {
-            await channel.track({ status: 'completed' });
-        }
+        if (channel) await channel.track({ status: 'completed' });
     };
 
     const trackAnswering = async () => {
+        if (channel) await channel.track({ status: 'answering' });
+    };
+
+    // 新增：老師廣播重置全班進度
+    const sendResetProgress = () => {
         if (channel) {
-            await channel.track({ status: 'answering' });
+            channel.send({ type: 'broadcast', event: 'RESET_PROGRESS' });
         }
     };
 
@@ -88,9 +92,7 @@ export function useClassroomSync() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                password,
-                action: 'UPDATE_SETTINGS',
-                payload: { isClassMode, targetCount }
+                password, action: 'UPDATE_SETTINGS', payload: { isClassMode, targetCount }
             })
         });
     };
@@ -99,5 +101,5 @@ export function useClassroomSync() {
         if (channel) { supabase.removeChannel(channel); channel = null; }
     };
 
-    return { joinRoom, trackCompleted, trackAnswering, sendPush, sendAddTime, updateClassMode, leaveRoom };
+    return { joinRoom, trackCompleted, trackAnswering, sendResetProgress, sendPush, sendAddTime, updateClassMode, leaveRoom };
 }

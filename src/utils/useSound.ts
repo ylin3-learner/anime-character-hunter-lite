@@ -1,43 +1,44 @@
-// 使用模組級變數，確保全局只有一個 AudioContext
+// 只有一個 AudioContext 實例
 let audioCtx: AudioContext | null = null;
 
-// 初始化並取得 AudioContext
-const getAudioContext = () => {
-    if (!audioCtx) {
-        const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-        if (AudioContext) {
-            audioCtx = new AudioContext();
-        }
-    }
-    return audioCtx;
-};
-
-// 👈 新增：解鎖 Web Audio API
+/**
+ * 唯一負責建立與解鎖 AudioContext 的函數
+ * 必須確保這個函數是在「同步」的使用者點擊事件（如 pointerdown）中被呼叫
+ */
 export const unlockAudioContext = () => {
-    const ctx = getAudioContext();
-    if (ctx && ctx.state === 'suspended') {
-        ctx.resume().then(() => {
-            console.log('🔓 Web Audio API unlocked');
-        }).catch(e => console.warn('Audio unlock failed', e));
+    // 如果已經建立過，直接跳過
+    if (audioCtx) return;
+
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return;
+
+    try {
+        // 1. 在同步事件中建立實例
+        audioCtx = new AudioContextClass();
+
+        // 2. 在同步事件中立刻請求恢復
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume().then(() => {
+                console.log('🔓 Web Audio API unlocked successfully');
+            }).catch(e => {
+                console.warn('Audio unlock failed', e);
+            });
+        } else {
+            console.log('🔓 Web Audio API already running');
+        }
+    } catch (e) {
+        console.warn('Web Audio API not supported', e);
     }
 };
 
 // 核心播放函式
-const playTone = async (freq: number, startTime: number, duration: number, type: OscillatorType = 'sine', volume = 0.2) => {
-    const ctx = getAudioContext();
-    if (!ctx) return;
+const playTone = (freq: number, startTime: number, duration: number, type: OscillatorType = 'sine', volume = 0.2) => {
+    // 👈 終極防護：如果沒有實例，或者狀態不是 running，直接靜默返回
+    // 絕對不要去嘗試 await ctx.resume()，這會引發瀏覽器警告
+    if (!audioCtx || audioCtx.state !== 'running') return;
 
-    if (ctx.state === 'suspended') {
-        try {
-            await ctx.resume();
-        } catch (e) {
-            console.warn('音效被瀏覽器阻擋，需使用者互動才能播放');
-            return;
-        }
-    }
-
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
 
     osc.type = type;
     osc.frequency.value = freq;
@@ -47,20 +48,18 @@ const playTone = async (freq: number, startTime: number, duration: number, type:
     gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
 
     osc.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(audioCtx.destination);
 
     osc.start(startTime);
     osc.stop(startTime + duration);
 };
 
 export function useSound() {
-    // 🎵 過關音效 (保持不變)
-    const playSuccess = async () => {
-        const ctx = getAudioContext();
-        if (!ctx) return;
-        if (ctx.state === 'suspended') await ctx.resume();
+    // 🎵 過關音效
+    const playSuccess = () => {
+        if (!audioCtx || audioCtx.state !== 'running') return;
 
-        const now = ctx.currentTime + 0.05;
+        const now = audioCtx.currentTime + 0.05;
         const notes = [523.25, 659.25, 783.99, 1046.50];
 
         notes.forEach((freq, index) => {
@@ -68,52 +67,42 @@ export function useSound() {
         });
     };
 
-    // ❌ 錯誤音效 (保持不變)
-    const playError = async () => {
-        const ctx = getAudioContext();
-        if (!ctx) return;
-        if (ctx.state === 'suspended') await ctx.resume();
+    // ❌ 錯誤音效
+    const playError = () => {
+        if (!audioCtx || audioCtx.state !== 'running') return;
 
-        const now = ctx.currentTime + 0.05;
+        const now = audioCtx.currentTime + 0.05;
         playTone(392.00, now, 0.15, 'triangle', 0.15);
         playTone(311.13, now + 0.15, 0.3, 'triangle', 0.15);
     };
 
-    // 🚨 防切屏警告音 (短促尖銳的逼逼逼)
-    const playWarningBeep = async () => {
-        const ctx = getAudioContext();
-        if (!ctx) return;
-        if (ctx.state === 'suspended') await ctx.resume();
+    // 🚨 防切屏警告音
+    const playWarningBeep = () => {
+        if (!audioCtx || audioCtx.state !== 'running') return;
 
-        const now = ctx.currentTime;
+        const now = audioCtx.currentTime;
 
-        // 自訂一個專門產生極短促警報聲的函數
         const playBeep = (startTime: number) => {
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
+            const osc = audioCtx!.createOscillator();
+            const gain = audioCtx!.createGain();
 
-            osc.type = 'square'; // 👈 方波，電子音、警告感最強
-            osc.frequency.setValueAtTime(1200, startTime); // 👈 1200Hz 高頻
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(1200, startTime);
 
-            // 快起快落，避免破音，但保持短促
             gain.gain.setValueAtTime(0, startTime);
-            gain.gain.linearRampToValueAtTime(0.15, startTime + 0.01); // 0.01秒內拉到最大聲
-            gain.gain.setValueAtTime(0.15, startTime + 0.07); // 維持 0.07 秒
-            gain.gain.linearRampToValueAtTime(0, startTime + 0.08); // 0.08秒瞬間收尾
+            gain.gain.linearRampToValueAtTime(0.15, startTime + 0.01);
+            gain.gain.setValueAtTime(0.15, startTime + 0.07);
+            gain.gain.linearRampToValueAtTime(0, startTime + 0.08);
 
             osc.connect(gain);
-            gain.connect(ctx.destination);
+            gain.connect(audioCtx!.destination);
 
             osc.start(startTime);
             osc.stop(startTime + 0.08);
         };
 
-        // 👈 連續三聲短促的「逼！逼！逼！」
-        // 第一聲：現在
         playBeep(now);
-        // 第二聲：間隔 0.15 秒
         playBeep(now + 0.15);
-        // 第三聲：再間隔 0.15 秒
         playBeep(now + 0.30);
     };
 

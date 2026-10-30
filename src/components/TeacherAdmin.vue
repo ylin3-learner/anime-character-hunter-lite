@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import type { QuestionData } from '../rules/types';
 import { VueDraggable } from 'vue-draggable-plus';
-import { useClassroomSync } from '../composables/useClassroomSync'; //  補上這行
+import { useClassroomSync } from '../composables/useClassroomSync';
 
 const props = defineProps<{ currentQuestions: QuestionData[]; }>();
 
@@ -17,7 +17,7 @@ const timeLimitForm = ref<number>(60);
 //  新增：班級控制狀態
 const isClassModeToggle = ref(false);
 const targetCountInput = ref(30);
-const { updateClassMode } = useClassroomSync();
+const { updateClassMode, sendResetProgress } = useClassroomSync();
 
 const emit = defineEmits<{
   (e: 'update', questions: QuestionData[]): void;
@@ -357,6 +357,10 @@ const saveAllAndClose = () => {
               <label>目標人數：</label>
               <input type="number" v-model.number="targetCountInput" @change="handleModeChange" />
             </div>
+            <!-- 新增：重置進度按鈕 -->
+            <button class="btn-reset-progress" @click="sendResetProgress">
+              🔄 重置全班作答進度
+            </button>
           </div>
 
           <div class="sidebar-section" style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
@@ -1382,5 +1386,23 @@ const saveAllAndClose = () => {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+.btn-reset-progress {
+  margin-top: 8px;
+  background: #ff4b4b;
+  color: white;
+  border: none;
+  border-bottom: 3px solid #cc0000;
+  padding: 8px;
+  border-radius: 8px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.1s;
+  width: 100%;
+}
+.btn-reset-progress:active {
+  border-bottom-width: 0;
+  transform: translateY(3px);
 }
 </style>

@@ -32,7 +32,7 @@ const questionBank = ref<QuestionData[]>([]);
 const currentStage = ref<'preview' | 'input' | 'macro' | 'micro' | 'success' | 'noticing'>('preview');
 const currentMode = ref<'relative' | 'preposition'>('relative');
 
-const { joinRoom, trackCompleted, trackAnswering, sendPush, sendAddTime, leaveRoom } = useClassroomSync();
+const { joinRoom, trackCompleted, trackAnswering, sendResetProgress, sendPush, sendAddTime, leaveRoom } = useClassroomSync();
 
 const { playSuccess, playError, playWarningBeep } = useSound();
 
@@ -78,8 +78,7 @@ const handleGlobalInteraction = () => {
 };
 
 onMounted(async () => {
-  document.addEventListener('pointerdown', handleGlobalInteraction);
-  document.addEventListener('touchstart', handleGlobalInteraction);
+  document.addEventListener('pointerup', handleGlobalInteraction);
 
   const cloudQuestions = await CloudDatabase.fetchQuestions();
   if (cloudQuestions && cloudQuestions.length > 0) {
@@ -129,12 +128,17 @@ onMounted(async () => {
     if (event === 'PRESENCE_SYNC') {
       presenceCompletedCount.value = payload.completedCount;
     }
+
+    // 新增：收到老師的重置指令
+    if (event === 'RESET_PROGRESS') {
+      console.log('📡 收到重置指令，進度歸零');
+      trackAnswering(); // 把自己狀態改回作答中
+    }
   }, studentId);
 });
 
 onUnmounted(() => {
-  document.removeEventListener('pointerdown', handleGlobalInteraction);
-  document.removeEventListener('touchstart', handleGlobalInteraction);
+  document.removeEventListener('pointerup', handleGlobalInteraction);
   leaveRoom();
 });
 
@@ -742,9 +746,15 @@ header h1 {
 }
 
 .btn-primary {
-  background-color: var(--success-color);
-  color: white;
+  /* 1. 直接寫死亮綠色，不使用變數，確保背景色一定顯示 */
+  background-color: #58cc02 !important; 
+  color: #ffffff !important; /* 確保文字是白色 */
+  
+  /* 2. 加深文字陰影，讓白字在亮綠底上依然清晰可見 */
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  
   border: none;
+  /* 3. 底部立體邊框，顏色比背景更深，產生 3D 效果 */
   border-bottom: 5px solid #46a302;
   padding: 16px 48px;
   font-size: 1.2rem;
@@ -755,17 +765,24 @@ header h1 {
   margin-top: 20px;
   width: 100%;
   max-width: 300px;
+  
+  /* 4. 消除點擊時的藍色方塊 */
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
 }
 
+/* 按下去的動畫保持不變 */
 .btn-primary:active:not(:disabled) {
   border-bottom-width: 0;
   transform: translateY(5px);
 }
 
+/* 處理禁用狀態，避免等待老師時按鈕也綠綠的 */
 .btn-primary:disabled {
-  background-color: #ccc;
-  border-bottom-color: #999;
+  background-color: #cccccc !important;
+  border-bottom-color: #999999 !important;
   cursor: not-allowed;
+  text-shadow: none;
 }
 
 .skip-hint {
